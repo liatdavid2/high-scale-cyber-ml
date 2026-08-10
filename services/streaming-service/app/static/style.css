@@ -1,30 +1,26 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f4f4f4;color:#161616}
-.page{width:min(1180px,calc(100% - 32px));margin:0 auto;padding:28px 0 48px}
+.page{width:min(1180px,calc(100% - 32px));margin:auto;padding:28px 0 48px}
 .header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:16px}
 .eyebrow{font-size:12px;font-weight:700;letter-spacing:1px;color:#525252;margin-bottom:7px}
 h1{margin:0 0 7px;font-size:30px}h2{margin:0 0 14px;font-size:19px}p{margin:0;color:#525252}
-.panel,.card{background:#fff;border:1px solid #e0e0e0}.panel{padding:18px;margin-bottom:14px}
-.flow{display:flex;gap:8px;align-items:stretch}.flow-step{flex:1;background:#f4f4f4;border-top:3px solid #0f62fe;padding:12px}
-.flow-step span{color:#0f62fe;font-size:12px;font-weight:700}.flow-step strong,.flow-step small{display:block;margin-top:5px}
-.flow-step small{color:#525252}.arrow{display:flex;align-items:center;color:#8d8d8d}
-.control-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.panel{background:#fff;border:1px solid #e0e0e0;padding:18px;margin-bottom:14px}
+.flow{display:flex;align-items:stretch;gap:8px}.step{flex:1;background:#f4f4f4;border-top:3px solid #0f62fe;padding:12px}
+.step b{color:#0f62fe}.step strong,.step small{display:block;margin-top:5px}.step small{color:#525252}
+.arrow{display:flex;align-items:center;color:#8d8d8d}.rates{font-size:13px;margin-top:14px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 label{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:700}
-select{height:40px;min-width:155px;background:#fff;border:1px solid #8d8d8d;padding:0 10px}
-button{height:40px;padding:0 16px;border:0;background:#0f62fe;color:#fff;font-weight:700;cursor:pointer}
-button.secondary{background:#393939}button.ghost{background:#fff;color:#161616;border:1px solid #8d8d8d}
+select{height:40px;min-width:160px;border:1px solid #8d8d8d;background:#fff;padding:0 10px}
+button{height:40px;border:0;padding:0 16px;background:#0f62fe;color:#fff;font-weight:700;cursor:pointer}
+button.dark{background:#393939}.ghost{background:#fff;color:#161616;border:1px solid #8d8d8d}
 .message{margin-top:12px;font-size:13px;color:#525252}.progress{height:9px;background:#e0e0e0;margin-top:10px}
 .progress div{height:100%;width:0;background:#0f62fe;transition:width .3s}
-.state{padding:8px 12px;font-size:12px;font-weight:700;background:#e0e0e0}
-.state.running{background:#defbe6;color:#0e6027}.state.stopped{background:#e0e0e0}
-.recommendation{border-left:4px solid #198038}.hidden{display:none}
+.state{padding:8px 12px;background:#e0e0e0;font-size:12px;font-weight:700}.state.running{background:#defbe6;color:#0e6027}
+.hidden{display:none}.recommendation{border-left:4px solid #198038}
 .recommend-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-.recommend-grid div{background:#f4f4f4;padding:14px}.recommend-grid span{display:block;font-size:12px;color:#525252}
+.recommend-grid div{background:#f4f4f4;padding:14px}.recommend-grid span{display:block;color:#525252;font-size:12px}
 .recommend-grid strong{display:block;font-size:22px;margin-top:6px}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #e0e0e0;font-size:13px}
-th{background:#f4f4f4}.result-STABLE{color:#198038;font-weight:700}.result-NEAR_LIMIT{color:#8a6d00;font-weight:700}
-.result-BOTTLENECK,.result-ERROR{color:#da1e28;font-weight:700}
-.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.card{padding:15px}
-.label{font-size:12px;color:#525252}.metric{font-size:25px;font-weight:700;margin-top:6px}.hint{font-size:13px}.top-gap{margin-top:12px}
-@media(max-width:900px){.flow{flex-direction:column}.arrow{display:none}.cards,.recommend-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:600px){.header{flex-direction:column}.cards,.recommend-grid{grid-template-columns:1fr}}
+th{background:#f4f4f4}.STABLE{color:#198038;font-weight:700}.NEAR_LIMIT{color:#8a6d00;font-weight:700}
+.BOTTLENECK,.ERROR{color:#da1e28;font-weight:700}
+@media(max-width:900px){.flow{flex-direction:column}.arrow{display:none}.recommend-grid{grid-template-columns:repeat(2,1fr)}}

@@ -1,41 +1,49 @@
-# streaming-service v3
+# streaming-service v4 — Adaptive saturation benchmark
 
-Automatic scalability benchmark for Kafka streaming.
+This version avoids brute-force testing every rate with every consumer count.
 
-## Full benchmark
+## Phase 1 — Find the 1-consumer saturation point
 
-The UI automatically runs:
+Rates:
 
-- Rates: 500, 750, 1000, 1250, 1500, 2000 events/sec
-- Consumers: 1, 2, 4
-- Total: 18 experiments
-
-Each experiment records:
-
-- produced/sec
-- processed/sec
-- Kafka lag
-- lag growth/sec
-- errors
-- result: STABLE / NEAR_LIMIT / BOTTLENECK / ERROR
-
-## Recommendation algorithm
-
-1. Exclude configurations with errors.
-2. Prefer configurations classified as STABLE.
-3. Require roughly >=95% of target throughput for STABLE.
-4. Select highest processed throughput.
-5. If multiple configurations are within 2% throughput, prefer fewer consumers.
-
-## UI
-
-`http://localhost:2050`
-
-## Important
-
-The topic should have 4 partitions. If the old local topic was created with 1 partition and old Kafka state does not matter:
-
-```bash
-docker compose down -v
-docker compose up --build
+```text
+500
+1000
+2000
+3000
+5000
+7500
+10000
+15000
 ```
+
+The benchmark stops increasing once a 1-consumer configuration becomes:
+
+```text
+NEAR_LIMIT
+BOTTLENECK
+ERROR
+```
+
+## Phase 2 — Scale around the bottleneck
+
+It then tests the detected rate, plus the next higher rate when available, using:
+
+```text
+2 consumers
+4 consumers
+```
+
+## Recommendation
+
+The service chooses the highest stable processed throughput.
+
+If configurations are within 2% throughput, fewer consumers are preferred.
+
+## Run
+
+```text
+http://localhost:2050
+```
+
+Use 10 seconds for a quick smoke test and 30–60 seconds for a more meaningful benchmark.

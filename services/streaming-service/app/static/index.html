@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Streaming Scalability Benchmark</title>
+  <title>Adaptive Kafka Scalability Benchmark</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,64 +11,59 @@
   <header class="header">
     <div>
       <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 2</div>
-      <h1>Streaming Scalability Benchmark</h1>
-      <p>Automatically find the best Kafka streaming configuration on this machine.</p>
+      <h1>Adaptive Kafka Scalability Benchmark</h1>
+      <p>Find the saturation point first, then test whether more consumers improve it.</p>
     </div>
-    <div id="runState" class="state stopped">IDLE</div>
+    <div id="runState" class="state">IDLE</div>
   </header>
 
   <section class="panel">
-    <h2>What does the benchmark do?</h2>
+    <h2>Benchmark strategy</h2>
     <div class="flow">
-      <div class="flow-step"><span>1</span><strong>Rates</strong><small>500 → 2000 events/sec</small></div>
+      <div class="step"><b>1</b><strong>1 Consumer</strong><small>Increase event rate</small></div>
       <div class="arrow">→</div>
-      <div class="flow-step"><span>2</span><strong>Consumers</strong><small>1 / 2 / 4</small></div>
+      <div class="step"><b>2</b><strong>Find Saturation</strong><small>Lag growth / throughput loss</small></div>
       <div class="arrow">→</div>
-      <div class="flow-step"><span>3</span><strong>18 Experiments</strong><small>Every combination</small></div>
+      <div class="step"><b>3</b><strong>2 Consumers</strong><small>Retest near limit</small></div>
       <div class="arrow">→</div>
-      <div class="flow-step"><span>4</span><strong>Evaluate</strong><small>Throughput + lag + errors</small></div>
+      <div class="step"><b>4</b><strong>4 Consumers</strong><small>Retest near limit</small></div>
       <div class="arrow">→</div>
-      <div class="flow-step"><span>5</span><strong>Recommend</strong><small>Best stable configuration</small></div>
+      <div class="step"><b>5</b><strong>Recommend</strong><small>Best stable configuration</small></div>
     </div>
+    <p class="rates">Search rates: 500 → 1K → 2K → 3K → 5K → 7.5K → 10K → 15K events/sec</p>
   </section>
 
   <section class="panel">
     <h2>Automatic Benchmark</h2>
-    <div class="control-row">
+    <div class="controls">
       <label>Dataset
-        <select id="benchDataset">
-          <option value="training">Training</option>
-          <option value="testing">Testing</option>
-        </select>
+        <select id="dataset"><option value="training">Training</option><option value="testing">Testing</option></select>
       </label>
-
       <label>Seconds per experiment
-        <select id="duration">
-          <option value="10">10 (quick test)</option>
-          <option value="30" selected>30</option>
-          <option value="60">60</option>
-        </select>
+        <select id="duration"><option value="10">10 quick</option><option value="30" selected>30</option><option value="60">60</option></select>
       </label>
-
-      <button id="runBenchmark">Run Full Benchmark</button>
-      <button id="stopBenchmark" class="secondary">Stop</button>
+      <button id="run">Run Adaptive Benchmark</button>
+      <button id="stop" class="dark">Stop</button>
       <button id="reset" class="ghost">Reset</button>
     </div>
-
     <div id="progressText" class="message">Not started.</div>
     <div class="progress"><div id="progressBar"></div></div>
+  </section>
+
+  <section id="limitBox" class="panel hidden">
+    <h2>Saturation Finding</h2>
+    <div id="limitText"></div>
   </section>
 
   <section id="recommendation" class="panel recommendation hidden">
     <h2>Recommended Configuration</h2>
     <div class="recommend-grid">
       <div><span>Consumers</span><strong id="recConsumers">-</strong></div>
-      <div><span>Target Rate</span><strong id="recTarget">-</strong></div>
+      <div><span>Target</span><strong id="recTarget">-</strong></div>
       <div><span>Processed/sec</span><strong id="recProcessed">-</strong></div>
-      <div><span>Lag Growth/sec</span><strong id="recLagGrowth">-</strong></div>
+      <div><span>Lag Growth/sec</span><strong id="recLag">-</strong></div>
       <div><span>Result</span><strong id="recResult">-</strong></div>
     </div>
-    <p class="hint">If two configurations are within 2% throughput, the benchmark prefers fewer consumers.</p>
   </section>
 
   <section class="panel">
@@ -76,49 +71,12 @@
     <table>
       <thead>
         <tr>
-          <th>Consumers</th>
-          <th>Target</th>
-          <th>Produced/sec</th>
-          <th>Processed/sec</th>
-          <th>Lag</th>
-          <th>Lag Growth/sec</th>
-          <th>Errors</th>
-          <th>Result</th>
+          <th>Consumers</th><th>Target</th><th>Produced/sec</th><th>Processed/sec</th>
+          <th>Lag</th><th>Lag Growth/sec</th><th>Errors</th><th>Result</th>
         </tr>
       </thead>
-      <tbody id="resultsBody">
-        <tr><td colspan="8">No benchmark results yet.</td></tr>
-      </tbody>
+      <tbody id="results"><tr><td colspan="8">No results yet.</td></tr></tbody>
     </table>
-  </section>
-
-  <section class="panel">
-    <h2>Manual Test</h2>
-    <p class="hint">Optional: test one configuration manually.</p>
-    <div class="control-row top-gap">
-      <label>Target rate
-        <select id="rate">
-          <option>500</option><option>750</option><option>1000</option>
-          <option>1250</option><option>1500</option><option>2000</option>
-        </select>
-      </label>
-      <label>Consumers
-        <select id="consumers">
-          <option>1</option><option>2</option><option>4</option>
-        </select>
-      </label>
-      <button id="manualStart">Start Manual Test</button>
-      <button id="manualStop" class="secondary">Stop</button>
-    </div>
-  </section>
-
-  <section class="cards">
-    <div class="card"><div class="label">Target</div><div id="targetRate" class="metric">0</div></div>
-    <div class="card"><div class="label">Produced/sec</div><div id="producedRate" class="metric">0</div></div>
-    <div class="card"><div class="label">Processed/sec</div><div id="processedRate" class="metric">0</div></div>
-    <div class="card"><div class="label">Kafka Lag</div><div id="lag" class="metric">0</div></div>
-    <div class="card"><div class="label">Consumers</div><div id="consumerCount" class="metric">1</div></div>
-    <div class="card"><div class="label">Errors</div><div id="errors" class="metric">0</div></div>
   </section>
 </main>
 <script src="/static/app.js"></script>
