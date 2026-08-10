@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UNSW-NB15 Streaming Service</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 2</div>
+        <h1>UNSW-NB15 Streaming Service</h1>
+        <p>Turn dataset rows into Kafka events and measure real-time streaming performance.</p>
+      </div>
+      <div id="runState" class="state stopped">STOPPED</div>
+    </header>
+
+    <section class="panel">
+      <h2>What happens in this stage?</h2>
+      <div class="flow">
+        <div class="flow-step"><span>1</span><strong>Read</strong><small>UNSW-NB15 rows</small></div>
+        <div class="arrow">→</div>
+        <div class="flow-step"><span>2</span><strong>Create Events</strong><small>JSON + event ID + timestamp</small></div>
+        <div class="arrow">→</div>
+        <div class="flow-step"><span>3</span><strong>Publish</strong><small>Kafka producer</small></div>
+        <div class="arrow">→</div>
+        <div class="flow-step"><span>4</span><strong>Consume</strong><small>Kafka consumer</small></div>
+        <div class="arrow">→</div>
+        <div class="flow-step"><span>5</span><strong>Evaluate</strong><small>Throughput, lag, errors</small></div>
+      </div>
+    </section>
+
+    <section class="panel controls">
+      <h2>Streaming Test</h2>
+      <div class="control-row">
+        <label>
+          Dataset
+          <select id="dataset">
+            <option value="training">Training</option>
+            <option value="testing">Testing</option>
+          </select>
+        </label>
+
+        <label>
+          Target rate (events/sec)
+          <input id="rate" type="number" min="1" max="20000" value="1000">
+        </label>
+
+        <button id="start">Start Streaming</button>
+        <button id="stop" class="secondary">Stop</button>
+        <button id="reset" class="ghost">Reset Metrics</button>
+      </div>
+      <div id="message" class="message">Ready.</div>
+    </section>
+
+    <section class="cards">
+      <div class="card"><div class="label">Target Rate</div><div id="targetRate" class="metric">0</div><div class="unit">events/sec</div></div>
+      <div class="card"><div class="label">Produced/sec</div><div id="producedRate" class="metric">0</div><div class="unit">events/sec</div></div>
+      <div class="card"><div class="label">Processed/sec</div><div id="processedRate" class="metric">0</div><div class="unit">events/sec</div></div>
+      <div class="card"><div class="label">Kafka Lag</div><div id="lag" class="metric">0</div><div class="unit">events</div></div>
+      <div class="card"><div class="label">Errors</div><div id="errors" class="metric">0</div><div id="errorRate" class="unit">0%</div></div>
+    </section>
+
+    <section class="panel">
+      <h2>Streaming Health</h2>
+      <table>
+        <tbody>
+          <tr><th>Producer</th><td id="producerStatus">STOPPED</td></tr>
+          <tr><th>Consumer</th><td id="consumerStatus">STOPPED</td></tr>
+          <tr><th>Kafka</th><td id="kafkaStatus">UNKNOWN</td></tr>
+          <tr><th>Dataset</th><td id="datasetStatus">training</td></tr>
+          <tr><th>Dataset rows</th><td id="datasetRows">0</td></tr>
+          <tr><th>Topic</th><td id="topic">-</td></tr>
+          <tr><th>Uptime</th><td id="uptime">0s</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Evaluation Counters</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Total Produced</th>
+            <th>Total Processed</th>
+            <th>Current Lag</th>
+            <th>Producer Errors</th>
+            <th>Consumer Errors</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td id="totalProduced">0</td>
+            <td id="totalProcessed">0</td>
+            <td id="lag2">0</td>
+            <td id="producerErrors">0</td>
+            <td id="consumerErrors">0</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="hint">
+        Increase the target rate gradually. When produced/sec stays above processed/sec,
+        lag grows and you have reached a streaming bottleneck.
+      </p>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
