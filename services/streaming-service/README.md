@@ -47,3 +47,40 @@ http://localhost:2050
 ```
 
 Use 10 seconds for a quick smoke test and 30–60 seconds for a more meaningful benchmark.
+
+
+## Continuous Streaming mode
+
+Stage 2 now supports two separate workflows.
+
+### Pipeline mode
+
+Use:
+
+```text
+Start Continuous Streaming
+```
+
+to continuously publish UNSW-NB15 events at a fixed rate.
+
+Typical pipeline:
+
+```text
+Stage 2 Continuous Streaming
+        ↓
+Kafka
+        ↓
+Stage 3 Feature Service
+        ↓
+Redis
+```
+
+### Benchmark mode
+
+Use:
+
+```text
+Run Adaptive Benchmark
+```
+
+only when measuring Kafka saturation and consumer scaling.

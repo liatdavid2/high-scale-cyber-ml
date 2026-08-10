@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Adaptive Kafka Scalability Benchmark</title>
+  <title>Kafka Streaming Service</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -11,14 +11,76 @@
   <header class="header">
     <div>
       <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 2</div>
-      <h1>Adaptive Kafka Scalability Benchmark</h1>
-      <p>Find the saturation point first, then test whether more consumers improve it.</p>
+      <h1>Kafka Streaming Service</h1>
+      <p>Use continuous streaming for the ML pipeline, or run the adaptive benchmark to find Kafka saturation.</p>
     </div>
     <div id="runState" class="state">IDLE</div>
   </header>
 
   <section class="panel">
-    <h2>Benchmark strategy</h2>
+    <h2>Stage 2 has two modes</h2>
+    <div class="mode-grid">
+      <div class="mode-card">
+        <strong>Continuous Streaming</strong>
+        <small>Feeds a steady stream of UNSW-NB15 events into Kafka for Stage 3.</small>
+      </div>
+      <div class="mode-card">
+        <strong>Adaptive Benchmark</strong>
+        <small>Finds the saturation point and evaluates 1 / 2 / 4 consumers.</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel continuous-panel">
+    <h2>Continuous Streaming</h2>
+    <p class="hint">Use this mode when the Feature Service needs live Kafka events.</p>
+
+    <div class="controls top-gap">
+      <label>Dataset
+        <select id="manualDataset">
+          <option value="training">Training</option>
+          <option value="testing">Testing</option>
+        </select>
+      </label>
+
+      <label>Target rate
+        <select id="manualRate">
+          <option value="500">500</option>
+          <option value="1000" selected>1000</option>
+          <option value="2000">2000</option>
+          <option value="3000">3000</option>
+          <option value="5000">5000</option>
+        </select>
+      </label>
+
+      <label>Stage 2 consumers
+        <select id="manualConsumers">
+          <option value="1" selected>1</option>
+          <option value="2">2</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+
+      <button id="continuousStart">Start Continuous Streaming</button>
+      <button id="continuousStop" class="dark">Stop</button>
+    </div>
+
+    <div id="continuousMessage" class="message">
+      Start continuous streaming, then start Feature Service on port 2100.
+    </div>
+
+    <section class="cards embedded-cards">
+      <div class="card"><div class="label">Target</div><div id="targetRate" class="metric">0</div><div class="unit">events/sec</div></div>
+      <div class="card"><div class="label">Produced/sec</div><div id="producedRate" class="metric">0</div><div class="unit">events/sec</div></div>
+      <div class="card"><div class="label">Processed/sec</div><div id="processedRate" class="metric">0</div><div class="unit">events/sec</div></div>
+      <div class="card"><div class="label">Kafka Lag</div><div id="lag" class="metric">0</div><div class="unit">events</div></div>
+      <div class="card"><div class="label">Consumers</div><div id="consumerCount" class="metric">1</div></div>
+      <div class="card"><div class="label">Errors</div><div id="errors" class="metric">0</div></div>
+    </section>
+  </section>
+
+  <section class="panel">
+    <h2>Adaptive Benchmark</h2>
     <div class="flow">
       <div class="step"><b>1</b><strong>1 Consumer</strong><small>Increase event rate</small></div>
       <div class="arrow">→</div>
@@ -34,18 +96,28 @@
   </section>
 
   <section class="panel">
-    <h2>Automatic Benchmark</h2>
+    <h2>Run Adaptive Benchmark</h2>
     <div class="controls">
       <label>Dataset
-        <select id="dataset"><option value="training">Training</option><option value="testing">Testing</option></select>
+        <select id="dataset">
+          <option value="training">Training</option>
+          <option value="testing">Testing</option>
+        </select>
       </label>
+
       <label>Seconds per experiment
-        <select id="duration"><option value="10">10 quick</option><option value="30" selected>30</option><option value="60">60</option></select>
+        <select id="duration">
+          <option value="10">10 quick</option>
+          <option value="30" selected>30</option>
+          <option value="60">60</option>
+        </select>
       </label>
+
       <button id="run">Run Adaptive Benchmark</button>
-      <button id="stop" class="dark">Stop</button>
+      <button id="stop" class="dark">Stop Benchmark</button>
       <button id="reset" class="ghost">Reset</button>
     </div>
+
     <div id="progressText" class="message">Not started.</div>
     <div class="progress"><div id="progressBar"></div></div>
   </section>
@@ -71,14 +143,23 @@
     <table>
       <thead>
         <tr>
-          <th>Consumers</th><th>Target</th><th>Produced/sec</th><th>Processed/sec</th>
-          <th>Lag</th><th>Lag Growth/sec</th><th>Errors</th><th>Result</th>
+          <th>Consumers</th>
+          <th>Target</th>
+          <th>Produced/sec</th>
+          <th>Processed/sec</th>
+          <th>Lag</th>
+          <th>Lag Growth/sec</th>
+          <th>Errors</th>
+          <th>Result</th>
         </tr>
       </thead>
-      <tbody id="results"><tr><td colspan="8">No results yet.</td></tr></tbody>
+      <tbody id="results">
+        <tr><td colspan="8">No results yet.</td></tr>
+      </tbody>
     </table>
   </section>
 </main>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

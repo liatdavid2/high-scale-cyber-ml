@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Feature Service</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="page">
+  <header class="header">
+    <div>
+      <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 3</div>
+      <h1>Feature Service</h1>
+      <p>Consume Kafka events, compute online ML features, and store them in Redis.</p>
+    </div>
+    <div id="runState" class="state stopped">STOPPED</div>
+  </header>
+
+  <section class="panel">
+    <h2>What happens in this stage?</h2>
+    <div class="flow">
+      <div class="step"><b>1</b><strong>Consume</strong><small>Kafka · unsw-events</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><b>2</b><strong>Extract</strong><small>Raw event fields</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><b>3</b><strong>Compute</strong><small>Derived + rolling features</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><b>4</b><strong>Store</strong><small>Redis online feature store</small></div>
+      <div class="arrow">→</div>
+      <div class="step"><b>5</b><strong>Evaluate</strong><small>Throughput + latency</small></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Feature Engineering Flow</h2>
+    <div class="feature-flow">
+      <div class="feature-flow-box">
+        <strong>Raw UNSW-NB15 Fields</strong>
+        <small>sbytes, dbytes, spkts, dpkts, proto, service, event timestamp</small>
+      </div>
+      <div class="feature-flow-arrow">→</div>
+      <div class="feature-flow-box">
+        <strong>Feature Engineering</strong>
+        <small>Derived ratios + 60-second rolling features</small>
+      </div>
+      <div class="feature-flow-arrow">→</div>
+      <div class="feature-flow-box">
+        <strong>Online Features</strong>
+        <small>Stored in Redis for future ML inference</small>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>How Features Are Built</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>New Feature</th>
+          <th>Built From</th>
+          <th>Formula / Meaning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>total_bytes</code></td>
+          <td><code>sbytes</code>, <code>dbytes</code></td>
+          <td><code>sbytes + dbytes</code></td>
+        </tr>
+        <tr>
+          <td><code>total_packets</code></td>
+          <td><code>spkts</code>, <code>dpkts</code></td>
+          <td><code>spkts + dpkts</code></td>
+        </tr>
+        <tr>
+          <td><code>byte_ratio_src_dst</code></td>
+          <td><code>sbytes</code>, <code>dbytes</code></td>
+          <td><code>sbytes / (dbytes + 1)</code></td>
+        </tr>
+        <tr>
+          <td><code>packet_ratio_src_dst</code></td>
+          <td><code>spkts</code>, <code>dpkts</code></td>
+          <td><code>spkts / (dpkts + 1)</code></td>
+        </tr>
+        <tr>
+          <td><code>bytes_per_packet</code></td>
+          <td><code>sbytes</code>, <code>dbytes</code>, <code>spkts</code>, <code>dpkts</code></td>
+          <td>Total bytes divided by total packets</td>
+        </tr>
+        <tr>
+          <td><code>proto_events_last_60s</code></td>
+          <td><code>proto</code>, event timestamp</td>
+          <td>Number of events with the same protocol in the last 60 seconds</td>
+        </tr>
+        <tr>
+          <td><code>service_events_last_60s</code></td>
+          <td><code>service</code>, event timestamp</td>
+          <td>Number of events with the same service in the last 60 seconds</td>
+        </tr>
+        <tr>
+          <td><code>avg_total_bytes_last_60s</code></td>
+          <td><code>sbytes</code>, <code>dbytes</code>, event timestamp</td>
+          <td>Average <code>total_bytes</code> across the last 60 seconds</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="hint">
+      <code>attack_cat</code> and <code>label</code> are intentionally excluded from feature generation to avoid target leakage.
+    </p>
+  </section>
+
+  <section class="panel">
+    <h2>Run Feature Processing</h2>
+    <div class="controls">
+      <button id="start">Start Feature Service</button>
+      <button id="stop" class="dark">Stop</button>
+      <button id="reset" class="ghost">Reset Metrics</button>
+    </div>
+    <div id="message" class="message">Ready. Start Stage 2 streaming, then start this service.</div>
+  </section>
+
+  <section class="cards">
+    <div class="card"><div class="label">Events/sec</div><div id="eventsRate" class="metric">0</div></div>
+    <div class="card"><div class="label">Features/sec</div><div id="featuresRate" class="metric">0</div></div>
+    <div class="card"><div class="label">Redis Writes/sec</div><div id="redisRate" class="metric">0</div></div>
+    <div class="card"><div class="label">p95 Latency</div><div id="p95" class="metric">0</div><div class="unit">ms</div></div>
+    <div class="card"><div class="label">p99 Latency</div><div id="p99" class="metric">0</div><div class="unit">ms</div></div>
+    <div class="card"><div class="label">Errors</div><div id="errors" class="metric">0</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>Feature Pipeline Health</h2>
+    <table>
+      <tbody>
+        <tr><th>Consumer</th><td id="consumerStatus">STOPPED</td></tr>
+        <tr><th>Kafka</th><td id="kafkaStatus">UNKNOWN</td></tr>
+        <tr><th>Redis</th><td id="redisStatus">UNKNOWN</td></tr>
+        <tr><th>Kafka topic</th><td id="topic">-</td></tr>
+        <tr><th>Consumer group</th><td id="group">-</td></tr>
+        <tr><th>Feature freshness</th><td id="freshness">0 ms</td></tr>
+        <tr><th>Uptime</th><td id="uptime">0s</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>Evaluation Counters</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Total Events</th>
+          <th>Total Feature Records</th>
+          <th>Redis Writes</th>
+          <th>p50</th>
+          <th>p95</th>
+          <th>p99</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td id="totalEvents">0</td>
+          <td id="totalFeatures">0</td>
+          <td id="redisWrites">0</td>
+          <td id="p50Table">0 ms</td>
+          <td id="p95Table">0 ms</td>
+          <td id="p99Table">0 ms</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
