@@ -128,7 +128,7 @@ async function loadProfile() {
       throw new Error(body.detail || "Evaluation failed");
     }
 
-    const totalColumns = body.files.reduce((sum, f) => sum + f.columns, 0);
+    const totalColumns = body.files.length ? body.files[0].columns : 0;
     const totalMissing = body.files.reduce((sum, f) => sum + f.missing_cells, 0);
     const totalDuplicates = body.files.reduce((sum, f) => sum + f.duplicate_rows, 0);
 
