@@ -1,122 +1,102 @@
-const fmt = value => new Intl.NumberFormat().format(value ?? 0);
+const $=id=>document.getElementById(id);
+const fmt=v=>new Intl.NumberFormat().format(v??0);
 
-const $ = id => document.getElementById(id);
+function renderMetrics(m){
+  $("targetRate").textContent=fmt(m.target_rate);
+  $("producedRate").textContent=fmt(m.produced_per_sec);
+  $("processedRate").textContent=fmt(m.processed_per_sec);
+  $("lag").textContent=fmt(m.lag);
+  $("consumerCount").textContent=m.consumer_count;
+  $("errors").textContent=fmt(m.errors);
+}
 
-const elements = {
-  state: $("runState"),
-  message: $("message"),
-  dataset: $("dataset"),
-  rate: $("rate"),
-  targetRate: $("targetRate"),
-  producedRate: $("producedRate"),
-  processedRate: $("processedRate"),
-  lag: $("lag"),
-  lag2: $("lag2"),
-  errors: $("errors"),
-  errorRate: $("errorRate"),
-  producerStatus: $("producerStatus"),
-  consumerStatus: $("consumerStatus"),
-  kafkaStatus: $("kafkaStatus"),
-  datasetStatus: $("datasetStatus"),
-  datasetRows: $("datasetRows"),
-  topic: $("topic"),
-  uptime: $("uptime"),
-  totalProduced: $("totalProduced"),
-  totalProcessed: $("totalProcessed"),
-  producerErrors: $("producerErrors"),
-  consumerErrors: $("consumerErrors"),
+function renderBenchmark(b){
+  const p=b.progress;
+  $("runState").textContent=b.running?p.status:"IDLE";
+  $("runState").className=b.running?"state running":"state stopped";
+  $("progressText").textContent=`${p.message} (${p.current}/${p.total})`;
+  $("progressBar").style.width=`${p.total?Math.round((p.current/p.total)*100):0}%`;
+
+  const body=$("resultsBody");
+  if(!b.results.length){
+    body.innerHTML='<tr><td colspan="8">No benchmark results yet.</td></tr>';
+  }else{
+    body.innerHTML=b.results.map(r=>`
+      <tr>
+        <td>${r.consumers}</td>
+        <td>${fmt(r.target_rate)}</td>
+        <td>${fmt(r.produced_per_sec)}</td>
+        <td>${fmt(r.processed_per_sec)}</td>
+        <td>${fmt(r.lag)}</td>
+        <td>${fmt(r.lag_growth_per_sec)}</td>
+        <td>${fmt(r.errors)}</td>
+        <td class="result-${r.result}">${r.result}</td>
+      </tr>`).join("");
+  }
+
+  if(b.recommended){
+    $("recommendation").classList.remove("hidden");
+    $("recConsumers").textContent=b.recommended.consumers;
+    $("recTarget").textContent=fmt(b.recommended.target_rate);
+    $("recProcessed").textContent=fmt(b.recommended.processed_per_sec);
+    $("recLagGrowth").textContent=fmt(b.recommended.lag_growth_per_sec);
+    $("recResult").textContent=b.recommended.result;
+  }else{
+    $("recommendation").classList.add("hidden");
+  }
+}
+
+async function refresh(){
+  try{
+    const [mres,bres]=await Promise.all([fetch("/api/metrics"),fetch("/api/benchmark")]);
+    renderMetrics(await mres.json());
+    renderBenchmark(await bres.json());
+  }catch(e){}
+}
+
+$("runBenchmark").onclick=async()=>{
+  const res=await fetch("/api/benchmark/start",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      dataset:$("benchDataset").value,
+      duration_seconds:Number($("duration").value)
+    })
+  });
+  const body=await res.json();
+  if(!res.ok) alert(body.detail||"Could not start benchmark");
+  refresh();
 };
 
-function setMessage(text, error = false) {
-  elements.message.textContent = text;
-  elements.message.className = error ? "message error" : "message";
-}
+$("stopBenchmark").onclick=async()=>{
+  await fetch("/api/stop",{method:"POST"});
+  refresh();
+};
 
-function render(m) {
-  elements.state.textContent = m.running ? "RUNNING" : "STOPPED";
-  elements.state.className = m.running ? "state running" : "state stopped";
+$("reset").onclick=async()=>{
+  const res=await fetch("/api/reset",{method:"POST"});
+  const body=await res.json();
+  if(!res.ok) alert(body.detail||"Could not reset");
+  refresh();
+};
 
-  elements.targetRate.textContent = fmt(m.target_rate);
-  elements.producedRate.textContent = fmt(m.produced_per_sec);
-  elements.processedRate.textContent = fmt(m.processed_per_sec);
-  elements.lag.textContent = fmt(m.lag);
-  elements.lag2.textContent = fmt(m.lag);
-  elements.errors.textContent = fmt(m.errors);
-  elements.errorRate.textContent = `${m.error_rate_pct}%`;
+$("manualStart").onclick=async()=>{
+  const res=await fetch("/api/start",{
+    method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({
+      dataset:$("benchDataset").value,
+      target_rate:Number($("rate").value),
+      consumers:Number($("consumers").value)
+    })
+  });
+  const body=await res.json();
+  if(!res.ok) alert(body.detail||"Could not start");
+  refresh();
+};
 
-  elements.producerStatus.textContent = m.producer_status;
-  elements.consumerStatus.textContent = m.consumer_status;
-  elements.kafkaStatus.textContent = m.kafka_status;
-  elements.datasetStatus.textContent = m.dataset;
-  elements.datasetRows.textContent = fmt(m.dataset_rows);
-  elements.topic.textContent = m.topic;
-  elements.uptime.textContent = `${fmt(m.uptime_seconds)}s`;
+$("manualStop").onclick=async()=>{
+  await fetch("/api/stop",{method:"POST"});
+  refresh();
+};
 
-  elements.totalProduced.textContent = fmt(m.total_produced);
-  elements.totalProcessed.textContent = fmt(m.total_processed);
-  elements.producerErrors.textContent = fmt(m.producer_errors);
-  elements.consumerErrors.textContent = fmt(m.consumer_errors);
-
-  if (m.last_error) {
-    setMessage(m.last_error, true);
-  }
-}
-
-async function metrics() {
-  try {
-    const res = await fetch("/api/metrics");
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.detail || "Could not load metrics");
-    render(body);
-  } catch (err) {
-    setMessage(err.message, true);
-  }
-}
-
-$("start").addEventListener("click", async () => {
-  setMessage("Starting streaming...");
-  try {
-    const res = await fetch("/api/start", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        dataset: elements.dataset.value,
-        target_rate: Number(elements.rate.value),
-      }),
-    });
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.detail || "Could not start");
-    setMessage(`Streaming started at target ${fmt(body.target_rate)} events/sec.`);
-    await metrics();
-  } catch (err) {
-    setMessage(err.message, true);
-  }
-});
-
-$("stop").addEventListener("click", async () => {
-  setMessage("Stopping...");
-  try {
-    const res = await fetch("/api/stop", {method: "POST"});
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.detail || "Could not stop");
-    setMessage("Streaming stopped.");
-    await metrics();
-  } catch (err) {
-    setMessage(err.message, true);
-  }
-});
-
-$("reset").addEventListener("click", async () => {
-  try {
-    const res = await fetch("/api/reset", {method: "POST"});
-    const body = await res.json();
-    if (!res.ok) throw new Error(body.detail || "Could not reset");
-    setMessage("Metrics reset.");
-    await metrics();
-  } catch (err) {
-    setMessage(err.message, true);
-  }
-});
-
-metrics();
-setInterval(metrics, 1000);
+refresh();
+setInterval(refresh,1000);

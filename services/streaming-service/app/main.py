@@ -10,59 +10,77 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from kafka import KafkaConsumer, KafkaProducer
-from kafka.errors import KafkaError
+from kafka import KafkaAdminClient, KafkaConsumer, KafkaProducer
+from kafka.admin import NewTopic
+from kafka.errors import KafkaError, TopicAlreadyExistsError
 from pydantic import BaseModel, Field
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DATA_DIR = Path(os.getenv("DATA_DIR", "/shared/data/raw"))
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "unsw-events")
+KAFKA_PARTITIONS = int(os.getenv("KAFKA_PARTITIONS", "4"))
 
 TRAIN_NAMES = ["UNSW_NB15_training-set.csv", "UNSW_NB15_training_set.csv"]
 TEST_NAMES = ["UNSW_NB15_testing-set.csv", "UNSW_NB15_testing_set.csv"]
 
-app = FastAPI(
-    title="UNSW-NB15 Streaming Service",
-    description="Stage 2 of high-scale-cyber-ml",
-    version="1.0.0",
-)
+RATES = [500, 750, 1000, 1250, 1500, 2000]
+CONSUMER_OPTIONS = [1, 2, 4]
+
+app = FastAPI(title="UNSW-NB15 Streaming Service", version="3.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 class StartRequest(BaseModel):
-    target_rate: int = Field(default=1000, ge=1, le=20000)
+    target_rate: int = Field(default=500, ge=1, le=20000)
     dataset: Literal["training", "testing"] = "training"
+    consumers: Literal[1, 2, 4] = 1
 
 
-class StreamingRuntime:
+class BenchmarkRequest(BaseModel):
+    dataset: Literal["training", "testing"] = "training"
+    duration_seconds: int = Field(default=30, ge=10, le=120)
+
+
+class Runtime:
     def __init__(self):
         self.lock = threading.Lock()
-        self.running = False
         self.stop_event = threading.Event()
-        self.producer_thread = None
-        self.consumer_thread = None
+        self.running = False
+        self.benchmark_running = False
+        self.benchmark_stop_event = threading.Event()
+        self.benchmark_thread = None
+        self.benchmark_results = []
+        self.recommended = None
+        self.benchmark_progress = {
+            "current": 0,
+            "total": len(RATES) * len(CONSUMER_OPTIONS),
+            "status": "IDLE",
+            "message": "Not started",
+        }
 
-        self.target_rate = 1000
+        self.target_rate = 500
         self.dataset_name = "training"
         self.dataset_rows = 0
+        self.consumer_count = 1
 
         self.total_produced = 0
         self.total_processed = 0
         self.producer_errors = 0
         self.consumer_errors = 0
 
-        self.produced_sec = 0
-        self.processed_sec = 0
-
+        self.produced_sec = 0.0
+        self.processed_sec = 0.0
         self._produced_window = 0
         self._processed_window = 0
         self._last_window = time.monotonic()
-        self.started_at = None
 
+        self.producer_thread = None
+        self.consumer_threads = []
         self.producer_status = "STOPPED"
         self.consumer_status = "STOPPED"
         self.kafka_status = "UNKNOWN"
+        self.started_at = None
         self.last_error = None
 
     def reset_metrics(self):
@@ -71,14 +89,14 @@ class StreamingRuntime:
             self.total_processed = 0
             self.producer_errors = 0
             self.consumer_errors = 0
-            self.produced_sec = 0
-            self.processed_sec = 0
+            self.produced_sec = 0.0
+            self.processed_sec = 0.0
             self._produced_window = 0
             self._processed_window = 0
             self._last_window = time.monotonic()
             self.last_error = None
 
-    def update_windows(self):
+    def update_window(self):
         now = time.monotonic()
         elapsed = now - self._last_window
         if elapsed >= 1.0:
@@ -88,34 +106,31 @@ class StreamingRuntime:
             self._processed_window = 0
             self._last_window = now
 
-    def metrics(self):
+    def snapshot(self):
         with self.lock:
-            self.update_windows()
+            self.update_window()
             lag = max(self.total_produced - self.total_processed, 0)
             errors = self.producer_errors + self.consumer_errors
-            uptime = 0
-            if self.started_at:
-                uptime = int(time.time() - self.started_at)
-
-            error_rate = 0.0
-            attempts = self.total_produced + errors
-            if attempts:
-                error_rate = round((errors / attempts) * 100, 4)
+            uptime = int(time.time() - self.started_at) if self.started_at else 0
+            lag_growth = round(self.produced_sec - self.processed_sec, 1)
 
             return {
                 "running": self.running,
+                "benchmark_running": self.benchmark_running,
                 "dataset": self.dataset_name,
                 "dataset_rows": self.dataset_rows,
                 "target_rate": self.target_rate,
+                "consumer_count": self.consumer_count,
+                "partitions": KAFKA_PARTITIONS,
                 "produced_per_sec": self.produced_sec,
                 "processed_per_sec": self.processed_sec,
                 "total_produced": self.total_produced,
                 "total_processed": self.total_processed,
                 "lag": lag,
+                "lag_growth_per_sec": lag_growth,
                 "producer_errors": self.producer_errors,
                 "consumer_errors": self.consumer_errors,
                 "errors": errors,
-                "error_rate_pct": error_rate,
                 "producer_status": self.producer_status,
                 "consumer_status": self.consumer_status,
                 "kafka_status": self.kafka_status,
@@ -125,7 +140,7 @@ class StreamingRuntime:
             }
 
 
-runtime = StreamingRuntime()
+runtime = Runtime()
 
 
 def find_file(dataset_name: str) -> Path:
@@ -134,11 +149,34 @@ def find_file(dataset_name: str) -> Path:
         path = DATA_DIR / name
         if path.exists():
             return path
+    raise HTTPException(404, f"{dataset_name} dataset not found in {DATA_DIR}")
 
-    raise HTTPException(
-        status_code=404,
-        detail=f"{dataset_name} UNSW-NB15 CSV not found in {DATA_DIR}",
-    )
+
+def ensure_topic():
+    admin = None
+    try:
+        admin = KafkaAdminClient(
+            bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS.split(","),
+            client_id="streaming-service-admin",
+        )
+        if KAFKA_TOPIC not in admin.list_topics():
+            admin.create_topics([
+                NewTopic(
+                    name=KAFKA_TOPIC,
+                    num_partitions=KAFKA_PARTITIONS,
+                    replication_factor=1,
+                )
+            ])
+        runtime.kafka_status = "CONNECTED"
+    except TopicAlreadyExistsError:
+        runtime.kafka_status = "CONNECTED"
+    except Exception as exc:
+        runtime.kafka_status = "ERROR"
+        runtime.last_error = str(exc)
+        raise
+    finally:
+        if admin:
+            admin.close()
 
 
 def create_producer():
@@ -148,21 +186,24 @@ def create_producer():
         acks=1,
         linger_ms=5,
         batch_size=32768,
-        retries=3,
+        retries=5,
         request_timeout_ms=10000,
+        api_version_auto_timeout_ms=10000,
     )
 
 
-def create_consumer():
+def create_consumer(consumer_id: int):
     return KafkaConsumer(
         KAFKA_TOPIC,
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS.split(","),
         auto_offset_reset="latest",
         enable_auto_commit=True,
         group_id="high-scale-cyber-ml-streaming",
+        client_id=f"stream-consumer-{consumer_id}",
         value_deserializer=lambda value: json.loads(value.decode("utf-8")),
-        consumer_timeout_ms=1000,
         max_poll_records=1000,
+        request_timeout_ms=30000,
+        api_version_auto_timeout_ms=10000,
     )
 
 
@@ -171,23 +212,20 @@ def producer_loop(df: pd.DataFrame):
     try:
         runtime.producer_status = "CONNECTING"
         producer = create_producer()
-        runtime.kafka_status = "CONNECTED"
         runtime.producer_status = "RUNNING"
-
         rows = df.to_dict(orient="records")
         row_index = 0
 
         while not runtime.stop_event.is_set():
-            batch_started = time.perf_counter()
             rate = max(runtime.target_rate, 1)
-
-            # Produce in small slices to remain responsive to Stop.
             slice_size = min(max(rate // 10, 1), 1000)
+            started = time.perf_counter()
 
             for _ in range(slice_size):
                 if runtime.stop_event.is_set():
                     break
 
+                current_row = row_index
                 source = rows[row_index]
                 row_index = (row_index + 1) % len(rows)
 
@@ -195,7 +233,7 @@ def producer_loop(df: pd.DataFrame):
                     "event_id": str(uuid.uuid4()),
                     "event_ts": time.time(),
                     "source_dataset": runtime.dataset_name,
-                    "source_row": row_index,
+                    "source_row": current_row,
                     "payload": source,
                 }
 
@@ -211,14 +249,14 @@ def producer_loop(df: pd.DataFrame):
 
             producer.flush(timeout=5)
 
-            expected_seconds = slice_size / rate
-            elapsed = time.perf_counter() - batch_started
-            sleep_for = expected_seconds - elapsed
-            if sleep_for > 0:
-                runtime.stop_event.wait(sleep_for)
+            expected = slice_size / rate
+            elapsed = time.perf_counter() - started
+            wait = expected - elapsed
+            if wait > 0:
+                runtime.stop_event.wait(wait)
 
             with runtime.lock:
-                runtime.update_windows()
+                runtime.update_window()
 
     except Exception as exc:
         with runtime.lock:
@@ -229,32 +267,25 @@ def producer_loop(df: pd.DataFrame):
         runtime.producer_status = "STOPPED"
         if producer:
             try:
-                producer.flush(timeout=3)
                 producer.close(timeout=3)
             except Exception:
                 pass
 
 
-def consumer_loop():
+def consumer_loop(consumer_id: int):
     consumer = None
     try:
-        runtime.consumer_status = "CONNECTING"
-        consumer = create_consumer()
-        runtime.kafka_status = "CONNECTED"
+        consumer = create_consumer(consumer_id)
         runtime.consumer_status = "RUNNING"
 
         while not runtime.stop_event.is_set():
             records = consumer.poll(timeout_ms=500, max_records=1000)
-
-            processed_now = 0
-            for _, messages in records.items():
-                processed_now += len(messages)
-
+            processed_now = sum(len(messages) for messages in records.values())
             if processed_now:
                 with runtime.lock:
                     runtime.total_processed += processed_now
                     runtime._processed_window += processed_now
-                    runtime.update_windows()
+                    runtime.update_window()
 
     except Exception as exc:
         with runtime.lock:
@@ -262,12 +293,186 @@ def consumer_loop():
             runtime.last_error = str(exc)
             runtime.kafka_status = "ERROR"
     finally:
-        runtime.consumer_status = "STOPPED"
         if consumer:
             try:
                 consumer.close()
             except Exception:
                 pass
+
+
+def start_internal(df: pd.DataFrame, dataset: str, rate: int, consumers: int):
+    runtime.reset_metrics()
+    runtime.stop_event.clear()
+    runtime.running = True
+    runtime.target_rate = rate
+    runtime.dataset_name = dataset
+    runtime.dataset_rows = len(df)
+    runtime.consumer_count = consumers
+    runtime.started_at = time.time()
+    runtime.producer_status = "STARTING"
+    runtime.consumer_status = "STARTING"
+
+    runtime.consumer_threads = []
+    for consumer_id in range(1, consumers + 1):
+        thread = threading.Thread(
+            target=consumer_loop,
+            args=(consumer_id,),
+            daemon=True,
+        )
+        runtime.consumer_threads.append(thread)
+        thread.start()
+
+    time.sleep(1.0)
+
+    runtime.producer_thread = threading.Thread(
+        target=producer_loop,
+        args=(df,),
+        daemon=True,
+    )
+    runtime.producer_thread.start()
+
+
+def stop_internal():
+    runtime.stop_event.set()
+
+    if runtime.producer_thread:
+        runtime.producer_thread.join(timeout=5)
+
+    for thread in runtime.consumer_threads:
+        thread.join(timeout=5)
+
+    runtime.running = False
+    runtime.producer_status = "STOPPED"
+    runtime.consumer_status = "STOPPED"
+
+
+def classify_result(result: dict) -> str:
+    if result["errors"] > 0:
+        return "ERROR"
+
+    coverage = result["processed_per_sec"] / result["target_rate"] if result["target_rate"] else 0
+
+    if result["lag_growth_per_sec"] <= 5 and coverage >= 0.95:
+        return "STABLE"
+    if result["lag_growth_per_sec"] <= 50 and coverage >= 0.90:
+        return "NEAR_LIMIT"
+    return "BOTTLENECK"
+
+
+def choose_recommended(results: list[dict]):
+    stable = [r for r in results if r["result"] == "STABLE"]
+    candidates = stable if stable else [r for r in results if r["result"] == "NEAR_LIMIT"]
+    if not candidates:
+        return None
+
+    candidates = sorted(
+        candidates,
+        key=lambda r: (-r["processed_per_sec"], r["consumers"], r["lag_growth_per_sec"]),
+    )
+
+    best = candidates[0]
+
+    # Prefer fewer consumers when throughput is within 2% of the best.
+    close = [
+        r for r in candidates
+        if r["processed_per_sec"] >= best["processed_per_sec"] * 0.98
+    ]
+    close = sorted(
+        close,
+        key=lambda r: (r["consumers"], -r["processed_per_sec"], r["lag_growth_per_sec"]),
+    )
+    return close[0]
+
+
+def benchmark_loop(dataset: str, duration_seconds: int):
+    try:
+        csv_path = find_file(dataset)
+        df = pd.read_csv(csv_path)
+        ensure_topic()
+
+        runtime.benchmark_results = []
+        runtime.recommended = None
+        total = len(RATES) * len(CONSUMER_OPTIONS)
+        current = 0
+
+        for consumers in CONSUMER_OPTIONS:
+            for rate in RATES:
+                if runtime.benchmark_stop_event.is_set():
+                    runtime.benchmark_progress = {
+                        "current": current,
+                        "total": total,
+                        "status": "STOPPED",
+                        "message": "Benchmark stopped by user.",
+                    }
+                    return
+
+                current += 1
+                runtime.benchmark_progress = {
+                    "current": current,
+                    "total": total,
+                    "status": "RUNNING",
+                    "message": f"Running {rate} events/sec with {consumers} consumer(s)",
+                }
+
+                start_internal(df, dataset, rate, consumers)
+
+                # Warmup first 20%, evaluate the remaining window.
+                warmup = max(2, int(duration_seconds * 0.2))
+                time.sleep(warmup)
+
+                samples = []
+                remaining = duration_seconds - warmup
+                for _ in range(remaining):
+                    if runtime.benchmark_stop_event.is_set():
+                        break
+                    time.sleep(1)
+                    samples.append(runtime.snapshot())
+
+                final = runtime.snapshot()
+                stop_internal()
+
+                if not samples:
+                    samples = [final]
+
+                avg_produced = round(sum(s["produced_per_sec"] for s in samples) / len(samples), 1)
+                avg_processed = round(sum(s["processed_per_sec"] for s in samples) / len(samples), 1)
+                avg_lag_growth = round(sum(s["lag_growth_per_sec"] for s in samples) / len(samples), 1)
+
+                result = {
+                    "consumers": consumers,
+                    "target_rate": rate,
+                    "produced_per_sec": avg_produced,
+                    "processed_per_sec": avg_processed,
+                    "lag": final["lag"],
+                    "lag_growth_per_sec": avg_lag_growth,
+                    "errors": final["errors"],
+                    "duration_seconds": duration_seconds,
+                }
+                result["result"] = classify_result(result)
+                runtime.benchmark_results.append(result)
+
+                # Small cooldown between experiments.
+                time.sleep(1)
+
+        runtime.recommended = choose_recommended(runtime.benchmark_results)
+        runtime.benchmark_progress = {
+            "current": total,
+            "total": total,
+            "status": "COMPLETED",
+            "message": "Benchmark completed.",
+        }
+
+    except Exception as exc:
+        runtime.benchmark_progress = {
+            "current": runtime.benchmark_progress.get("current", 0),
+            "total": len(RATES) * len(CONSUMER_OPTIONS),
+            "status": "ERROR",
+            "message": str(exc),
+        }
+    finally:
+        if runtime.running:
+            stop_internal()
+        runtime.benchmark_running = False
 
 
 @app.get("/")
@@ -280,96 +485,102 @@ def health():
     return {
         "status": "ok",
         "service": "streaming-service",
-        "kafka_bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
         "topic": KAFKA_TOPIC,
-        "data_dir": str(DATA_DIR),
+        "partitions": KAFKA_PARTITIONS,
     }
 
 
 @app.get("/api/metrics")
-def get_metrics():
-    return runtime.metrics()
+def metrics():
+    return runtime.snapshot()
+
+
+@app.get("/api/benchmark")
+def benchmark_status():
+    return {
+        "running": runtime.benchmark_running,
+        "progress": runtime.benchmark_progress,
+        "results": runtime.benchmark_results,
+        "recommended": runtime.recommended,
+        "rates": RATES,
+        "consumer_options": CONSUMER_OPTIONS,
+    }
 
 
 @app.post("/api/start")
-def start_streaming(request: StartRequest):
-    if runtime.running:
-        raise HTTPException(status_code=409, detail="Streaming is already running.")
+def start(request: StartRequest):
+    if runtime.running or runtime.benchmark_running:
+        raise HTTPException(409, "Streaming or benchmark is already running.")
 
-    csv_path = find_file(request.dataset)
-    try:
-        df = pd.read_csv(csv_path)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Could not read dataset: {exc}") from exc
-
-    if df.empty:
-        raise HTTPException(status_code=400, detail="Dataset is empty.")
-
-    runtime.reset_metrics()
-    runtime.target_rate = request.target_rate
-    runtime.dataset_name = request.dataset
-    runtime.dataset_rows = len(df)
-    runtime.started_at = time.time()
-    runtime.stop_event.clear()
-    runtime.running = True
-    runtime.producer_status = "STARTING"
-    runtime.consumer_status = "STARTING"
-
-    runtime.consumer_thread = threading.Thread(
-        target=consumer_loop,
-        daemon=True,
-        name="stream-consumer",
-    )
-    runtime.producer_thread = threading.Thread(
-        target=producer_loop,
-        args=(df,),
-        daemon=True,
-        name="stream-producer",
-    )
-
-    # Start consumer first to reduce initial lag.
-    runtime.consumer_thread.start()
-    time.sleep(0.5)
-    runtime.producer_thread.start()
+    df = pd.read_csv(find_file(request.dataset))
+    ensure_topic()
+    start_internal(df, request.dataset, request.target_rate, request.consumers)
 
     return {
         "status": "started",
-        "dataset": request.dataset,
-        "dataset_rows": len(df),
         "target_rate": request.target_rate,
+        "consumers": request.consumers,
+        "partitions": KAFKA_PARTITIONS,
     }
 
 
 @app.post("/api/stop")
-def stop_streaming():
+def stop():
+    if runtime.benchmark_running:
+        runtime.benchmark_stop_event.set()
+        return {"status": "benchmark_stop_requested"}
+
     if not runtime.running:
         return {"status": "already_stopped"}
 
-    runtime.stop_event.set()
-
-    if runtime.producer_thread:
-        runtime.producer_thread.join(timeout=5)
-    if runtime.consumer_thread:
-        runtime.consumer_thread.join(timeout=5)
-
-    runtime.running = False
-    runtime.producer_status = "STOPPED"
-    runtime.consumer_status = "STOPPED"
-
-    return {"status": "stopped", "metrics": runtime.metrics()}
+    stop_internal()
+    return {"status": "stopped", "metrics": runtime.snapshot()}
 
 
 @app.post("/api/reset")
-def reset_metrics():
-    if runtime.running:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop streaming before resetting metrics.",
-        )
+def reset():
+    if runtime.running or runtime.benchmark_running:
+        raise HTTPException(409, "Stop streaming/benchmark before resetting.")
 
     runtime.reset_metrics()
     runtime.dataset_rows = 0
     runtime.started_at = None
-    runtime.kafka_status = "UNKNOWN"
-
+    runtime.benchmark_results = []
+    runtime.recommended = None
+    runtime.benchmark_progress = {
+        "current": 0,
+        "total": len(RATES) * len(CONSUMER_OPTIONS),
+        "status": "IDLE",
+        "message": "Not started",
+    }
     return {"status": "reset"}
+
+
+@app.post("/api/benchmark/start")
+def start_benchmark(request: BenchmarkRequest):
+    if runtime.running or runtime.benchmark_running:
+        raise HTTPException(409, "Streaming or benchmark is already running.")
+
+    runtime.benchmark_stop_event.clear()
+    runtime.benchmark_running = True
+    runtime.benchmark_results = []
+    runtime.recommended = None
+    runtime.benchmark_progress = {
+        "current": 0,
+        "total": len(RATES) * len(CONSUMER_OPTIONS),
+        "status": "STARTING",
+        "message": "Preparing benchmark...",
+    }
+
+    runtime.benchmark_thread = threading.Thread(
+        target=benchmark_loop,
+        args=(request.dataset, request.duration_seconds),
+        daemon=True,
+    )
+    runtime.benchmark_thread.start()
+
+    return {
+        "status": "started",
+        "experiments": len(RATES) * len(CONSUMER_OPTIONS),
+        "duration_seconds": request.duration_seconds,
+    }

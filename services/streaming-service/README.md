@@ -1,56 +1,41 @@
-# streaming-service
+# streaming-service v3
 
-Stage 2 of `high-scale-cyber-ml`.
+Automatic scalability benchmark for Kafka streaming.
 
-## Flow
+## Full benchmark
 
-```text
-shared/data/raw/UNSW-NB15
-        ↓
-Streaming Service
-        ↓
-Kafka Producer
-        ↓
-unsw-events topic
-        ↓
-Kafka Consumer
-        ↓
-Live Metrics
-```
+The UI automatically runs:
 
-The service reads UNSW-NB15 rows, converts each row to a JSON event, publishes events at a configurable target rate, consumes them back, and measures throughput / lag / errors.
+- Rates: 500, 750, 1000, 1250, 1500, 2000 events/sec
+- Consumers: 1, 2, 4
+- Total: 18 experiments
+
+Each experiment records:
+
+- produced/sec
+- processed/sec
+- Kafka lag
+- lag growth/sec
+- errors
+- result: STABLE / NEAR_LIMIT / BOTTLENECK / ERROR
+
+## Recommendation algorithm
+
+1. Exclude configurations with errors.
+2. Prefer configurations classified as STABLE.
+3. Require roughly >=95% of target throughput for STABLE.
+4. Select highest processed throughput.
+5. If multiple configurations are within 2% throughput, prefer fewer consumers.
 
 ## UI
 
-After integrating the service into the root Docker Compose:
+`http://localhost:2050`
 
-```text
-http://localhost:2050
+## Important
+
+The topic should have 4 partitions. If the old local topic was created with 1 partition and old Kafka state does not matter:
+
+```bash
+docker compose down -v
+docker compose up --build
 ```
-
-## API
-
-```text
-GET  /health
-GET  /api/metrics
-POST /api/start
-POST /api/stop
-POST /api/reset
-```
-
-Start body example:
-
-```json
-{
-  "target_rate": 1000,
-  "dataset": "training"
-}
-```
-
-## Notes
-
-- CPU only.
-- No Spark/Flink yet.
-- One Kafka broker.
-- Dataset is mounted from the repository-level `shared/data`.
-- When the CSV reaches the end, the generator loops from the beginning so load tests can continue without creating huge local files.
