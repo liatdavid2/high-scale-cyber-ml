@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.env.local
+
+shared/data/raw/*.csv
+shared/data/raw/*.parquet
+shared/data/processed/*
+!shared/data/processed/.gitkeep
+.env

@@ -1,0 +1,13 @@
+services:
+  dataset-service:
+    build:
+      context: ./services/dataset-service
+      dockerfile: Dockerfile
+    container_name: high-scale-cyber-ml-dataset
+    ports:
+      - "2000:8000"
+    environment:
+      DATA_DIR: "${DATA_DIR:-/shared/data/raw}"
+    volumes:
+      - ./shared/data:/shared/data
+    restart: unless-stopped

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UNSW-NB15 Dataset Service</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 1</div>
+        <h1>UNSW-NB15 Dataset Service</h1>
+        <p>Dataset validation and baseline data-quality evaluation.</p>
+      </div>
+      <button id="run">Run Evaluation</button>
+    </header>
+
+    <div id="status" class="status">Loading…</div>
+
+    <section id="summary" class="cards"></section>
+
+    <section class="panel">
+      <h2>Dataset Files</h2>
+      <div id="files"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Class Distribution</h2>
+      <div id="classes"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Data Quality</h2>
+      <div id="quality"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Schema</h2>
+      <div id="schema"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
