@@ -51,3 +51,57 @@ th{background:#f4f4f4}code{background:#f4f4f4;padding:2px 4px}
   .feature-flow{flex-direction:column}
   .feature-flow-arrow{display:none}
 }
+
+
+.benchmark-panel{
+  border-left:4px solid #0f62fe;
+}
+.progress{
+  height:9px;
+  background:#e0e0e0;
+  margin-top:10px;
+}
+.progress div{
+  width:0;
+  height:100%;
+  background:#0f62fe;
+  transition:width .3s;
+}
+.rates{
+  margin-top:10px;
+  font-size:12px;
+  color:#525252;
+}
+.recommendation{
+  border-left:4px solid #198038;
+}
+.recommend-grid{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:10px;
+}
+.recommend-grid div{
+  background:#f4f4f4;
+  padding:14px;
+}
+.recommend-grid span{
+  display:block;
+  font-size:12px;
+  color:#525252;
+}
+.recommend-grid strong{
+  display:block;
+  font-size:21px;
+  margin-top:6px;
+}
+.hidden{display:none}
+.STABLE{color:#198038;font-weight:700}
+.NEAR_LIMIT{color:#8a6d00;font-weight:700}
+.BOTTLENECK,.ERROR{color:#da1e28;font-weight:700}
+.top-gap{margin-top:12px}
+@media(max-width:900px){
+  .recommend-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:600px){
+  .recommend-grid{grid-template-columns:1fr}
+}

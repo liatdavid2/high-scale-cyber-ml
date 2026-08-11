@@ -48,3 +48,40 @@ new feature
 ```
 
 This makes the feature-engineering logic visible and easier to review.
+
+
+## Automatic capacity benchmark
+
+Stage 3 can now control Stage 2 continuous streaming through its API.
+
+Benchmark rates:
+
+```text
+250
+500
+750
+1000
+1500
+2000
+3000
+5000 events/sec
+```
+
+For each rate it measures:
+
+- features/sec
+- Redis writes/sec
+- p50 / p95 / p99 latency
+- feature freshness
+- errors
+
+Classification:
+
+```text
+STABLE
+NEAR_LIMIT
+BOTTLENECK
+ERROR
+```
+
+The benchmark stops after a clear bottleneck and recommends the highest stable capacity.
