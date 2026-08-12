@@ -1,125 +1,30 @@
-# high-scale-cyber-ml
+# High Scale Cyber RAG
 
-Incremental high-scale cyber ML engineering project.
+This ZIP contains the RAG service that plugs into the high-scale cyber/ML project.
 
-The project is designed to run locally on CPU with Docker Compose, while keeping the architecture easy to extend later to cloud infrastructure.
+Chosen stack:
+- Qdrant
+- FastEmbed local CPU embeddings
+- FastAPI
+- MITRE ATT&CK + CAPEC
+- Optional OpenAI generation
 
-## Current stage
+Ports preserved from the project plan:
+- Dataset service: 2000
+- Streaming: 2050
+- Feature service: 2100
+- RAG: 2300
+- Qdrant: 6333
+- Kafka external: 29092
 
-### Stage 1 — Dataset Service
-
-Loads and evaluates UNSW-NB15 CSV files.
-
-Current checks:
-
-- row count
-- schema / column names
-- detected label column
-- number of classes
-- class distribution
-- missing values
-- duplicate rows
-- approximate memory usage
-
-## Repository structure
-
-```text
-high-scale-cyber-ml/
-├── docker-compose.yml
-├── README.md
-├── .env
-├── services/
-│   └── dataset-service/
-│       ├── app/
-│       │   ├── main.py
-│       │   └── static/
-│       │       ├── index.html
-│       │       ├── style.css
-│       │       └── app.js
-│       ├── Dockerfile
-│       ├── requirements.txt
-│       └── README.md
-└── shared/
-    ├── data/
-    │   ├── raw/
-    │   └── processed/
-    └── schemas/
-```
-
-## Why data is under `shared/`
-
-The dataset is intentionally outside `dataset-service`.
-
-Later services will need the same data:
-
-```text
-dataset-service
-streaming-service
-training-service
-evaluation-service
-```
-
-Keeping the data in `shared/data/` avoids copying large files between services.
-
-## Add UNSW-NB15
-
-Copy one or both files to:
-
-```text
-shared/data/raw/
-```
-
-Expected names:
-
-```text
-UNSW_NB15_training-set.csv
-UNSW_NB15_testing-set.csv
-```
-
-Underscore variants are also accepted.
-
-## Run
-
-From the repository root:
+Start this RAG slice with:
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.rag.yml up --build
 ```
 
-Open:
-
-```text
-http://localhost:8000
-```
-
-Health:
-
-```text
-http://localhost:8000/health
-```
-
-JSON profile:
-
-```text
-http://localhost:8000/api/profile
-```
-
-## Stop
+Then:
 
 ```bash
-docker compose down
+curl.exe -X POST http://localhost:2300/ingest
 ```
-
-## Planned services
-
-```text
-dataset-service
-streaming-service
-feature-service
-training-service
-inference-service
-load-test-service
-monitoring-service
-```
-
-Infrastructure services such as Kafka, Redis and MinIO will also be added to the root Docker Compose as needed.

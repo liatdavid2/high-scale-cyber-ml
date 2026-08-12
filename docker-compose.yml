@@ -1,4 +1,30 @@
 services:
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: high-scale-cyber-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  rag-service:
+    build:
+      context: ./services/rag-service
+    container_name: high-scale-cyber-rag
+    ports:
+      - "2300:2300"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: cyber_knowledge
+      KNOWLEDGE_ROOT: /data/knowledge
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    volumes:
+      - ./shared/data/knowledge:/data/knowledge:ro
+    depends_on:
+      - qdrant
+
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.14.0
     container_name: high-scale-cyber-ml-mlflow
@@ -128,3 +154,4 @@ services:
 volumes:
   kafka-data:
   mlflow-data:
+  qdrant_data:
