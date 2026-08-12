@@ -8,3 +8,4 @@ shared/data/raw/*.parquet
 shared/data/processed/*
 !shared/data/processed/.gitkeep
 .env
+*.zip
