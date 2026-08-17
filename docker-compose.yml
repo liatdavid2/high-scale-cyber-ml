@@ -1,5 +1,21 @@
 services:
 
+  monitoring-service:
+    build:
+      context: ./services/monitoring-service
+      dockerfile: Dockerfile
+    container_name: high-scale-cyber-ml-monitoring
+    ports:
+      - "2450:8000"
+    environment:
+      DATA_DIR: /shared/data/raw
+      INFERENCE_URL: http://inference-service:8000
+    volumes:
+      - ./shared/data:/shared/data:ro
+    depends_on:
+      - inference-service
+    restart: unless-stopped
+
   inference-service:
     build:
       context: ./services/inference-service
