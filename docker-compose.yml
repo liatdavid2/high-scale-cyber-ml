@@ -1,5 +1,24 @@
 services:
 
+  load-test-service:
+    build:
+      context: ./services/load-test-service
+      dockerfile: Dockerfile
+    container_name: high-scale-cyber-ml-load-test
+    ports:
+      - "2250:8000"
+    environment:
+      STREAMING_URL: http://streaming-service:8000
+      FEATURE_URL: http://feature-service:8000
+      INFERENCE_URL: http://inference-service:8000
+      MONITORING_URL: http://monitoring-service:8000
+      LOAD_TEST_WARMUP_SECONDS: 5
+    depends_on:
+      - streaming-service
+      - feature-service
+      - inference-service
+    restart: unless-stopped
+
   monitoring-service:
     build:
       context: ./services/monitoring-service

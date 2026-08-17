@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>End-to-End Load Test</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="page">
+<header class="header">
+  <div>
+    <div class="eyebrow">HIGH-SCALE-CYBER-ML · LOAD TEST</div>
+    <h1>End-to-End Load Test</h1>
+    <p>Measure sustainable pipeline capacity and identify the first limiting service.</p>
+  </div>
+  <div id="state" class="state">IDLE</div>
+</header>
+
+<section class="panel">
+  <h2>Pipeline Under Test</h2>
+  <div class="flow">
+    <div><strong>Streaming</strong><small>Kafka input rate</small></div>
+    <span>→</span>
+    <div><strong>Feature Service</strong><small>Feature throughput + freshness</small></div>
+    <span>→</span>
+    <div><strong>Redis</strong><small>Online feature writes</small></div>
+    <span>→</span>
+    <div><strong>Inference</strong><small>Serving availability + latency</small></div>
+  </div>
+</section>
+
+<section class="panel run-panel">
+  <h2>Automatic Capacity Benchmark</h2>
+  <p class="hint">The test increases load until the first clear bottleneck appears.</p>
+
+  <div class="controls">
+    <label>Dataset
+      <select id="dataset">
+        <option value="training">Training</option>
+        <option value="testing">Testing</option>
+      </select>
+    </label>
+
+    <label>Seconds per rate
+      <select id="duration">
+        <option value="10">10 quick</option>
+        <option value="20" selected>20</option>
+        <option value="30">30</option>
+        <option value="60">60</option>
+      </select>
+    </label>
+
+    <button id="run">Run Full Load Test</button>
+    <button id="stop" class="dark">Stop</button>
+    <button id="reset" class="ghost">Reset</button>
+  </div>
+
+  <div id="progressText" class="message">Not started.</div>
+  <div class="progress"><div id="progressBar"></div></div>
+  <p class="rates">Rates: 250 → 500 → 750 → 1000 → 1250 → 1500 → 2000 events/sec</p>
+</section>
+
+<section id="recommendation" class="panel recommendation hidden">
+  <h2>Recommended End-to-End Capacity</h2>
+  <div class="cards">
+    <div><span>Stable Input Rate</span><strong id="recRate">-</strong></div>
+    <div><span>Completed/sec</span><strong id="recCompleted">-</strong></div>
+    <div><span>E2E p95</span><strong id="recP95">-</strong></div>
+    <div><span>Feature Freshness</span><strong id="recFreshness">-</strong></div>
+    <div><span>First Bottleneck</span><strong id="recBottleneck">-</strong></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Benchmark Results</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Target</th>
+        <th>Completed/sec</th>
+        <th>Feature p95</th>
+        <th>Feature Freshness</th>
+        <th>Inference p95</th>
+        <th>E2E p50</th>
+        <th>E2E p95</th>
+        <th>E2E p99</th>
+        <th>Errors</th>
+        <th>Bottleneck</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody id="results">
+      <tr><td colspan="11">No load-test results yet.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <h2>How the Result Is Classified</h2>
+  <table class="rules">
+    <tbody>
+      <tr><th>STABLE</th><td>Completed throughput ≥95% of target, E2E p95 ≤100 ms, feature freshness ≤2 s, zero probe errors.</td></tr>
+      <tr><th>NEAR_LIMIT</th><td>Completed throughput ≥90%, E2E p95 ≤300 ms, feature freshness ≤10 s.</td></tr>
+      <tr><th>BOTTLENECK</th><td>Pipeline cannot keep up, freshness/backlog grows, or latency exceeds the sustainable thresholds.</td></tr>
+    </tbody>
+  </table>
+</section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
