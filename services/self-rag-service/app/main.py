@@ -37,7 +37,7 @@ init_db()
 class RowQuery(BaseModel):
     row_index: int = Field(ge=0)
     top_k: int = Field(default=5, ge=1, le=20)
-    use_llm: bool = True
+    use_llm: bool = False
 
 
 class FeatureQuery(BaseModel):
@@ -48,7 +48,7 @@ class FeatureQuery(BaseModel):
     spkts: float
     dpkts: float
     top_k: int = Field(default=5, ge=1, le=20)
-    use_llm: bool = True
+    use_llm: bool = False
 
 
 class BenchmarkRequest(BaseModel):
@@ -106,6 +106,20 @@ def query_row(req: RowQuery):
     result = query_by_row(req.row_index, req.top_k)
     deterministic = explain_cases(result["query_features"], result["matches"])
 
+    matches = result["matches"]
+    query_label = result["query_label"]
+    query_attack = result["query_attack_cat"]
+
+    label_matches = [int(m.get("label") == query_label) for m in matches]
+    attack_matches = [int(bool(query_attack) and m.get("attack_cat") == query_attack) for m in matches]
+
+    ground_truth_eval = {
+        "top1_label_match": bool(label_matches[0]) if label_matches else False,
+        "top1_attack_match": bool(attack_matches[0]) if attack_matches else False,
+        "label_agreement_at_k": (sum(label_matches) / len(label_matches)) if label_matches else 0.0,
+        "attack_agreement_at_k": (sum(attack_matches) / len(attack_matches)) if attack_matches else 0.0,
+    }
+
     self_check = None
     self_check_ms = 0.0
 
@@ -134,6 +148,7 @@ def query_row(req: RowQuery):
     return {
         **result,
         "explanation": deterministic,
+        "ground_truth_eval": ground_truth_eval,
         "self_check": self_check,
         "self_check_ms": self_check_ms,
         "total_ms": total_ms,

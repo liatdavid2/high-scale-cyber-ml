@@ -73,7 +73,7 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}
       <select id="topK">
         <option>3</option><option selected>5</option><option>10</option>
       </select>
-      <label><input id="useLLM" type="checkbox" checked> OpenAI self-check</label>
+      <label><input id="useLLM" type="checkbox"> Optional LLM explanation</label>
       <button onclick="runRowQuery()">Find Similar Cases</button>
       <button class="secondary" onclick="ingest()">Ingest / Rebuild Index</button>
     </div>
@@ -85,10 +85,17 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}
 
   <div class="grid" id="queryMetrics" style="display:none">
     <div class="metric"><div>Retrieval</div><div class="value" id="retrievalMs">-</div></div>
-    <div class="metric"><div>Self-RAG Judge</div><div class="value" id="judgeMs">-</div></div>
+    <div class="metric"><div>LLM Explanation</div><div class="value" id="judgeMs">0 ms</div></div>
     <div class="metric"><div>Total</div><div class="value" id="totalMs">-</div></div>
     <div class="metric"><div>Top-1 Similarity</div><div class="value" id="top1Sim">-</div></div>
     <div class="metric"><div>Retrieved Cases</div><div class="value" id="matchCount">-</div></div>
+  </div>
+
+  <div class="grid" id="groundTruthMetrics" style="display:none">
+    <div class="metric"><div>Top-1 Label Match</div><div class="value" id="gtTop1Label">-</div></div>
+    <div class="metric"><div>Top-1 Attack Match</div><div class="value" id="gtTop1Attack">-</div></div>
+    <div class="metric"><div>Label Agreement@K</div><div class="value" id="gtLabelK">-</div></div>
+    <div class="metric"><div>Attack Agreement@K</div><div class="value" id="gtAttackK">-</div></div>
   </div>
 
   <div class="box">
@@ -97,8 +104,8 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}
   </div>
 
   <div class="box">
-    <h3>Self-RAG Check</h3>
-    <pre id="selfCheck">No evaluation yet.</pre>
+    <h3>Optional LLM Explanation</h3>
+    <pre id="selfCheck">Disabled by default. Ground-truth evaluation above uses label and attack category.</pre>
   </div>
 </section>
 
@@ -238,6 +245,13 @@ async function runRowQuery(){
   document.getElementById('top1Sim').textContent=d.matches.length?d.matches[0].similarity.toFixed(5):'-';
   document.getElementById('matchCount').textContent=d.matches.length;
 
+  const gt=d.ground_truth_eval;
+  document.getElementById('groundTruthMetrics').style.display='grid';
+  document.getElementById('gtTop1Label').textContent=gt.top1_label_match?'PASS':'FAIL';
+  document.getElementById('gtTop1Attack').textContent=gt.top1_attack_match?'PASS':'FAIL';
+  document.getElementById('gtLabelK').textContent=(gt.label_agreement_at_k*100).toFixed(0)+'%';
+  document.getElementById('gtAttackK').textContent=(gt.attack_agreement_at_k*100).toFixed(0)+'%';
+
   let html=`<p><b>Query row:</b> ${d.query_row_index} &nbsp; <b>True label:</b> ${d.query_label} &nbsp; <b>Attack category:</b> ${d.query_attack_cat}</p>`;
   html+='<table><tr><th>Rank</th><th>Row</th><th>Similarity</th><th>Label</th><th>Attack Category</th><th>Why Similar?</th><th>Main Differences</th></tr>';
   d.explanation.forEach(x=>{
@@ -245,7 +259,7 @@ async function runRowQuery(){
   });
   html+='</table>';
   document.getElementById('results').innerHTML=html;
-  document.getElementById('selfCheck').textContent=JSON.stringify(d.self_check,null,2);
+  document.getElementById('selfCheck').textContent=d.self_check?JSON.stringify(d.self_check,null,2):'LLM explanation disabled. Ground-truth evaluation uses label and attack category.';
 }
 
 async function runBenchmark(){

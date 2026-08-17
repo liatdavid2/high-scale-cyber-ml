@@ -104,3 +104,10 @@ Top K = 5
 - similarity shown with 5 decimal places
 - explanations show query value, retrieved-case value, and relative difference
 - latency split into Retrieval / Self-RAG Judge / Total
+
+
+## Ground-truth evaluation update
+- OpenAI is OFF by default and is not used as a judge.
+- Per-query evaluation uses label and attack_cat after retrieval only.
+- UI shows Top-1 Label Match, Top-1 Attack Match, Label Agreement@K, Attack Agreement@K.
+- Optional LLM explanation remains available, but is not part of the core evaluation.
