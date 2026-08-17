@@ -1,4 +1,20 @@
 services:
+
+  inference-service:
+    build:
+      context: ./services/inference-service
+      dockerfile: Dockerfile
+    container_name: high-scale-cyber-ml-inference
+    ports:
+      - "2200:8000"
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_REGISTERED_MODEL_NAME: cyber-intrusion-model
+      MLFLOW_MODEL_ALIAS: champion
+    depends_on:
+      - mlflow
+    restart: unless-stopped
+
   self-rag-service:
     build:
       context: ./services/self-rag-service
