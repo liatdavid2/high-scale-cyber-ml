@@ -28,6 +28,12 @@ th{background:#e8e8e8}
 .warn{color:#b28600;font-weight:bold}
 pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}
 .small{font-size:12px;color:#555}
+.row-info{display:inline-flex;gap:10px;align-items:center;margin-left:12px;padding:8px 12px;background:#f4f4f4;border-left:3px solid #0f62fe}
+.badge{font-weight:bold;padding:3px 8px;background:#e8e8e8}
+.attack{background:#fff1f1}
+.normal{background:#defbe6}
+.quick-buttons{display:inline-flex;gap:6px;margin-left:10px}
+.feature-reason{line-height:1.45}
 </style>
 </head>
 <body>
@@ -47,19 +53,39 @@ pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}
 <section id="query" class="panel active">
   <div class="box">
     <h3>Query by dataset row</h3>
-    <label>Row index</label>
-    <input id="rowIndex" type="number" value="100" min="0">
-    <label>Top K</label>
-    <select id="topK">
-      <option>3</option><option selected>5</option><option>10</option>
-    </select>
-    <label><input id="useLLM" type="checkbox" checked> OpenAI self-check</label>
-    <button onclick="runRowQuery()">Find Similar Cases</button>
-    <button class="secondary" onclick="ingest()">Ingest / Rebuild Index</button>
+
+    <div>
+      <label>Row index</label>
+      <input id="rowIndex" type="number" value="100" min="0" oninput="scheduleLookup()">
+
+      <span class="row-info" id="rowInfo">
+        <span>Row 100</span><span class="badge">Loading...</span>
+      </span>
+
+      <span class="quick-buttons">
+        <button class="secondary" onclick="pickRandom(0)">Random Normal</button>
+        <button class="secondary" onclick="pickRandom(1)">Random Attack</button>
+      </span>
+    </div>
+
+    <div style="margin-top:14px">
+      <label>Top K</label>
+      <select id="topK">
+        <option>3</option><option selected>5</option><option>10</option>
+      </select>
+      <label><input id="useLLM" type="checkbox" checked> OpenAI self-check</label>
+      <button onclick="runRowQuery()">Find Similar Cases</button>
+      <button class="secondary" onclick="ingest()">Ingest / Rebuild Index</button>
+    </div>
+
+    <p class="small">
+      Similarity uses traffic features only. Label and attack category are shown only for evaluation and are not part of the retrieval vector.
+    </p>
   </div>
 
   <div class="grid" id="queryMetrics" style="display:none">
     <div class="metric"><div>Retrieval</div><div class="value" id="retrievalMs">-</div></div>
+    <div class="metric"><div>Self-RAG Judge</div><div class="value" id="judgeMs">-</div></div>
     <div class="metric"><div>Total</div><div class="value" id="totalMs">-</div></div>
     <div class="metric"><div>Top-1 Similarity</div><div class="value" id="top1Sim">-</div></div>
     <div class="metric"><div>Retrieved Cases</div><div class="value" id="matchCount">-</div></div>
@@ -126,6 +152,56 @@ document.querySelectorAll('.tab').forEach(t=>{
   };
 });
 
+
+let lookupTimer=null;
+
+function scheduleLookup(){
+  clearTimeout(lookupTimer);
+  lookupTimer=setTimeout(lookupRow,250);
+}
+
+async function lookupRow(){
+  const idx=Number(document.getElementById('rowIndex').value);
+  const box=document.getElementById('rowInfo');
+
+  if(!Number.isFinite(idx) || idx<0){
+    box.innerHTML='<span>Invalid row</span>';
+    return;
+  }
+
+  try{
+    const r=await fetch('/api/row/'+idx);
+    const d=await r.json();
+
+    if(!r.ok){
+      box.innerHTML='<span>Row not found</span>';
+      return;
+    }
+
+    const cls=d.label===1?'attack':'normal';
+
+    box.innerHTML=
+      `<span><b>Row ${d.row_index}</b></span>`+
+      `<span class="badge ${cls}">Label ${d.label}: ${d.label_name}</span>`+
+      `<span class="badge ${cls}">${d.attack_cat || '-'}</span>`;
+  }catch(e){
+    box.innerHTML='<span>Lookup failed</span>';
+  }
+}
+
+async function pickRandom(label){
+  const r=await fetch('/api/random-row?label='+label);
+  const d=await r.json();
+
+  if(!r.ok){
+    alert(d.detail||'Could not select row');
+    return;
+  }
+
+  document.getElementById('rowIndex').value=d.row_index;
+  await lookupRow();
+}
+
 async function refreshStatus(){
   try{
     const r=await fetch('/api/status'); const d=await r.json();
@@ -134,6 +210,7 @@ async function refreshStatus(){
   }catch(e){document.getElementById('status').textContent='Failed to fetch status';}
 }
 refreshStatus();
+lookupRow();
 
 async function ingest(){
   document.getElementById('status').textContent='Indexing UNSW-NB15 cases...';
@@ -156,14 +233,15 @@ async function runRowQuery(){
 
   document.getElementById('queryMetrics').style.display='grid';
   document.getElementById('retrievalMs').textContent=d.retrieval_ms.toFixed(1)+' ms';
+  document.getElementById('judgeMs').textContent=(d.self_check_ms||0).toFixed(1)+' ms';
   document.getElementById('totalMs').textContent=d.total_ms.toFixed(1)+' ms';
-  document.getElementById('top1Sim').textContent=d.matches.length?d.matches[0].similarity.toFixed(3):'-';
+  document.getElementById('top1Sim').textContent=d.matches.length?d.matches[0].similarity.toFixed(5):'-';
   document.getElementById('matchCount').textContent=d.matches.length;
 
   let html=`<p><b>Query row:</b> ${d.query_row_index} &nbsp; <b>True label:</b> ${d.query_label} &nbsp; <b>Attack category:</b> ${d.query_attack_cat}</p>`;
   html+='<table><tr><th>Rank</th><th>Row</th><th>Similarity</th><th>Label</th><th>Attack Category</th><th>Why Similar?</th><th>Main Differences</th></tr>';
   d.explanation.forEach(x=>{
-    html+=`<tr><td>${x.rank}</td><td>${x.row_index}</td><td><b>${x.similarity.toFixed(3)}</b></td><td>${x.label}</td><td>${x.attack_cat}</td><td>${x.why_similar.join('<br>')}</td><td>${x.differences.join('<br>')||'Minor differences'}</td></tr>`;
+    html+=`<tr><td>${x.rank}</td><td>${x.row_index}</td><td><b>${x.similarity.toFixed(5)}</b></td><td>${x.label}</td><td>${x.attack_cat}</td><td class="feature-reason">${x.why_similar.join('<br>')}</td><td class="feature-reason">${x.differences.join('<br>')||'Minor differences'}</td></tr>`;
   });
   html+='</table>';
   document.getElementById('results').innerHTML=html;

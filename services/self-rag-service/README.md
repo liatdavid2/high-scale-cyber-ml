@@ -96,3 +96,11 @@ Then query any dataset row, e.g.:
 row_index = 100
 Top K = 5
 ```
+
+
+## Updated UI
+- automatic row lookup shows Label + Attack Category before retrieval
+- Random Normal / Random Attack buttons
+- similarity shown with 5 decimal places
+- explanations show query value, retrieved-case value, and relative difference
+- latency split into Retrieval / Self-RAG Judge / Total

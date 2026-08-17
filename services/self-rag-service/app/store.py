@@ -377,3 +377,35 @@ def dataset_status():
         "label_used_for_retrieval": False,
         "attack_cat_used_for_retrieval": False,
     }
+
+
+def get_row_info(row_index):
+    df = _load_df()
+    if row_index < 0 or row_index >= len(df):
+        raise IndexError(f"row_index {row_index} out of range 0..{len(df)-1}")
+    row = df.iloc[row_index]
+    label = int(pd.to_numeric(row.get("label", 0), errors="coerce") or 0)
+    return {
+        "row_index": int(row_index),
+        "label": label,
+        "label_name": "Attack" if label == 1 else "Normal",
+        "attack_cat": str(row.get("attack_cat", "")),
+    }
+
+
+def get_random_row(label=None):
+    df = _load_df()
+    if label is not None:
+        labels = pd.to_numeric(df["label"], errors="coerce").fillna(0).astype(int)
+        df = df[labels == int(label)]
+    if len(df) == 0:
+        raise ValueError("No rows match the requested label")
+    row = df.sample(n=1).iloc[0]
+    row_index = int(row.name)
+    row_label = int(pd.to_numeric(row.get("label", 0), errors="coerce") or 0)
+    return {
+        "row_index": row_index,
+        "label": row_label,
+        "label_name": "Attack" if row_label == 1 else "Normal",
+        "attack_cat": str(row.get("attack_cat", "")),
+    }

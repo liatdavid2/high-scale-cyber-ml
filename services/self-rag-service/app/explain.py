@@ -38,13 +38,13 @@ def explain_cases(query_features, matches):
         furthest = diffs[-2:]
 
         reasons = [
-            f"{label} is close ({diff*100:.1f}% relative difference)"
-            for _, label, diff, _, _ in closest
+            f"{label}: query={q:.4g}, case={m:.4g}, difference={diff*100:.2f}%"
+            for _, label, diff, q, m in closest
         ]
 
         caveats = [
-            f"{label} differs more ({diff*100:.1f}%)"
-            for _, label, diff, _, _ in reversed(furthest)
+            f"{label}: query={q:.4g}, case={m:.4g}, difference={diff*100:.2f}%"
+            for _, label, diff, q, m in reversed(furthest)
             if diff > 0.20
         ]
 

@@ -20,6 +20,8 @@ from app.store import (
     query_by_row,
     query_by_features,
     benchmark_retrieval,
+    get_row_info,
+    get_random_row,
 )
 from app.explain import explain_cases, llm_self_check
 from app.history import init_db, save_query, list_queries
@@ -74,6 +76,22 @@ def status():
     return dataset_status()
 
 
+@app.get("/api/row/{row_index}")
+def row_info(row_index: int):
+    try:
+        return get_row_info(row_index)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/random-row")
+def random_row(label: Optional[int] = None):
+    try:
+        return get_random_row(label)
+    except Exception as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.post("/api/ingest")
 def ingest():
     try:
@@ -89,12 +107,16 @@ def query_row(req: RowQuery):
     deterministic = explain_cases(result["query_features"], result["matches"])
 
     self_check = None
+    self_check_ms = 0.0
+
     if req.use_llm:
+        judge_started = time.perf_counter()
         self_check = llm_self_check(
             query_features=result["query_features"],
             matches=result["matches"],
             deterministic_explanation=deterministic,
         )
+        self_check_ms = (time.perf_counter() - judge_started) * 1000
 
     total_ms = (time.perf_counter() - started) * 1000
 
@@ -113,6 +135,7 @@ def query_row(req: RowQuery):
         **result,
         "explanation": deterministic,
         "self_check": self_check,
+        "self_check_ms": self_check_ms,
         "total_ms": total_ms,
         "record_id": record_id,
     }
@@ -129,12 +152,16 @@ def query_features(req: FeatureQuery):
     deterministic = explain_cases(result["query_features"], result["matches"])
 
     self_check = None
+    self_check_ms = 0.0
+
     if use_llm:
+        judge_started = time.perf_counter()
         self_check = llm_self_check(
             query_features=result["query_features"],
             matches=result["matches"],
             deterministic_explanation=deterministic,
         )
+        self_check_ms = (time.perf_counter() - judge_started) * 1000
 
     total_ms = (time.perf_counter() - started) * 1000
 
@@ -153,6 +180,7 @@ def query_features(req: FeatureQuery):
         **result,
         "explanation": deterministic,
         "self_check": self_check,
+        "self_check_ms": self_check_ms,
         "total_ms": total_ms,
         "record_id": record_id,
     }
