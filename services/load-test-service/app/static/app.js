@@ -33,7 +33,10 @@ function render(d){
     $("recCompleted").textContent=fmt(r.completed_per_sec);
     $("recP95").textContent=`${fmt(r.e2e_p95_ms)} ms`;
     $("recFreshness").textContent=`${fmt(r.feature_freshness_ms)} ms`;
-    $("recBottleneck").textContent=r.bottleneck==="None"?"No bottleneck at recommended rate":r.bottleneck;
+    $("recNextRate").textContent=r.next_tested_rate ? `${fmt(r.next_tested_rate)} /sec` : "Not reached";
+    $("recBottleneck").textContent=r.first_bottleneck && r.first_bottleneck !== "None"
+      ? r.first_bottleneck
+      : "No bottleneck detected";
   }else{
     $("recommendation").classList.add("hidden");
   }

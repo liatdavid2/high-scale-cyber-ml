@@ -18,7 +18,7 @@ button.dark{background:#393939}.ghost{background:white;color:#161616;border:1px 
 .message{margin-top:12px;color:#525252;font-size:13px}.progress{height:9px;background:#e0e0e0;margin-top:10px}
 .progress div{width:0;height:100%;background:#0f62fe;transition:width .3s}.rates,.hint{font-size:13px;margin-top:9px}
 .state{padding:8px 12px;background:#e0e0e0;font-size:12px;font-weight:700}.state.running{background:#defbe6;color:#0e6027}
-.cards{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.cards div{background:#f4f4f4;padding:14px}
+.cards{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.cards div{background:#f4f4f4;padding:14px}
 .cards span{display:block;font-size:12px;color:#525252}.cards strong{display:block;font-size:20px;margin-top:5px}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid #e0e0e0;font-size:12px}
 th{background:#f4f4f4}.STABLE{color:#198038;font-weight:700}.NEAR_LIMIT{color:#8a6d00;font-weight:700}.BOTTLENECK,.ERROR{color:#da1e28;font-weight:700}

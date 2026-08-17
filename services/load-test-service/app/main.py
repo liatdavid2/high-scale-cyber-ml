@@ -194,6 +194,25 @@ def choose_recommended(results):
     return stable[0]
 
 
+def build_recommendation(results):
+    recommended = choose_recommended(results)
+    if not recommended:
+        return None
+
+    next_failed = None
+    for row in results:
+        if row["target_rate"] > recommended["target_rate"] and row["result"] in ("BOTTLENECK", "ERROR"):
+            next_failed = row
+            break
+
+    return {
+        **recommended,
+        "next_tested_rate": next_failed["target_rate"] if next_failed else None,
+        "first_bottleneck": next_failed["bottleneck"] if next_failed else "None",
+        "first_failed_result": next_failed["result"] if next_failed else None,
+    }
+
+
 def benchmark_loop(dataset, duration_seconds, rates):
     runtime.running = True
     runtime.stop_event.clear()
@@ -321,15 +340,28 @@ def benchmark_loop(dataset, duration_seconds, rates):
 
             time.sleep(1)
 
-        runtime.recommended = choose_recommended(runtime.results)
+        runtime.recommended = build_recommendation(runtime.results)
 
         if runtime.progress["status"] != "STOPPED":
-            runtime.progress = {
-                "current": len(runtime.results),
-                "total": len(runtime.results),
-                "status": "COMPLETED",
-                "message": "End-to-end benchmark completed.",
-            }
+            bottleneck_seen = any(
+                r["result"] in ("BOTTLENECK", "ERROR")
+                for r in runtime.results
+            )
+
+            if bottleneck_seen:
+                runtime.progress = {
+                    "current": len(runtime.results),
+                    "total": len(rates),
+                    "status": "COMPLETED",
+                    "message": f"Benchmark stopped after first bottleneck. {len(runtime.results)} rates tested.",
+                }
+            else:
+                runtime.progress = {
+                    "current": len(runtime.results),
+                    "total": len(rates),
+                    "status": "COMPLETED",
+                    "message": f"Benchmark completed. {len(runtime.results)} rates tested.",
+                }
 
     except Exception as exc:
         runtime.last_error = str(exc)
