@@ -1,3 +1,4 @@
+import gc
 import os
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
@@ -5,8 +6,10 @@ from app.embedder import embed_texts
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://qdrant:6333")
 COLLECTION = os.getenv("QDRANT_COLLECTION", "cyber_knowledge")
+INGEST_BATCH_SIZE = int(os.getenv("INGEST_BATCH_SIZE", "128"))
 
 _client = QdrantClient(url=QDRANT_URL)
+
 
 def ensure_collection(vector_size: int):
     names = {c.name for c in _client.get_collections().collections}
@@ -16,23 +19,48 @@ def ensure_collection(vector_size: int):
             vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
         )
 
-def upsert_documents(documents: list[dict]):
+
+def upsert_documents(documents: list[dict], batch_size: int = INGEST_BATCH_SIZE):
     if not documents:
         return 0
 
-    vectors = embed_texts([d["text"] for d in documents])
-    ensure_collection(len(vectors[0]))
+    indexed = 0
+    collection_ready = False
 
-    points = [
-        PointStruct(
-            id=i,
-            vector=vectors[i],
-            payload=documents[i],
+    for start in range(0, len(documents), batch_size):
+        batch = documents[start:start + batch_size]
+        vectors = embed_texts([d["text"] for d in batch])
+
+        if not vectors:
+            continue
+
+        if not collection_ready:
+            ensure_collection(len(vectors[0]))
+            collection_ready = True
+
+        points = [
+            PointStruct(
+                id=start + i,
+                vector=vectors[i],
+                payload=batch[i],
+            )
+            for i in range(len(batch))
+        ]
+
+        _client.upsert(
+            collection_name=COLLECTION,
+            points=points,
+            wait=True,
         )
-        for i in range(len(documents))
-    ]
-    _client.upsert(collection_name=COLLECTION, points=points)
-    return len(points)
+
+        indexed += len(points)
+
+        # Release each batch before creating the next embeddings batch.
+        del vectors, points, batch
+        gc.collect()
+
+    return indexed
+
 
 def search_knowledge(query: str, top_k: int = 5):
     vector = embed_texts([query])[0]

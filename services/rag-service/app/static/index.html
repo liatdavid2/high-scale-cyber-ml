@@ -1,33 +1,113 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Cyber RAG</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>High Scale Cyber RAG</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 920px; margin: 40px auto; padding: 0 20px; }
-    textarea { width: 100%; min-height: 90px; }
-    button { padding: 10px 18px; margin-top: 10px; }
-    pre { white-space: pre-wrap; background: #f4f4f4; padding: 16px; }
+    :root{--blue:#0f62fe;--ink:#161616;--muted:#525252;--line:#e0e0e0;--bg:#f4f4f4;--panel:#fff;--good:#198038;--bad:#da1e28;--warn:#f1c21b}
+    *{box-sizing:border-box} body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--ink)}
+    header{height:52px;background:#161616;color:#fff;display:flex;align-items:center;padding:0 24px;font-size:18px;font-weight:600}
+    header span{color:#78a9ff;margin-left:8px;font-weight:400}.wrap{max-width:1500px;margin:0 auto;padding:24px}
+    .hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:18px}.hero h1{font-size:30px;margin:0 0 6px}.hero p{margin:0;color:var(--muted)}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}button,a.btn{border:0;background:var(--blue);color:#fff;padding:11px 16px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}button.secondary,a.secondary{background:#fff;color:#161616;border:1px solid #8d8d8d}button:disabled{opacity:.5;cursor:not-allowed}
+    .tabs{display:flex;border-bottom:1px solid #8d8d8d;background:#fff}.tab{padding:14px 18px;cursor:pointer;border-bottom:3px solid transparent}.tab.active{border-color:var(--blue);font-weight:600;color:var(--blue)}
+    .panel{display:none;background:#fff;padding:20px;border:1px solid var(--line);border-top:0}.panel.active{display:block}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}.card{background:#fff;border:1px solid var(--line);padding:16px}.panel .card{background:#fafafa}.c12{grid-column:span 12}.c8{grid-column:span 8}.c6{grid-column:span 6}.c4{grid-column:span 4}.c3{grid-column:span 3}
+    label{display:block;font-size:13px;font-weight:600;margin-bottom:6px}textarea,input,select{width:100%;border:1px solid #8d8d8d;padding:10px;background:#fff;font-size:14px}textarea{min-height:100px;resize:vertical}
+    .row{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.field{min-width:150px;flex:1}.field.small{max-width:160px}.check{display:flex;gap:7px;align-items:center;height:40px}.check input{width:auto}
+    .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.kpi{border-left:4px solid var(--blue);background:#f4f4f4;padding:14px}.kpi .v{font-size:24px;font-weight:700;margin-top:6px}.kpi .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px;vertical-align:top}th{background:#e8e8e8}.score{font-weight:700}.good{color:var(--good)}.bad{color:var(--bad)}.muted{color:var(--muted)}
+    pre{white-space:pre-wrap;word-break:break-word;background:#f4f4f4;padding:14px;max-height:330px;overflow:auto}.answer{line-height:1.5;background:#f4f4f4;padding:14px;min-height:80px}.source{padding:10px 0;border-bottom:1px solid var(--line)}.source b{color:#0043ce}.status{padding:10px 12px;margin:12px 0;background:#edf5ff;border-left:4px solid var(--blue)}
+    .bar{height:8px;background:#e0e0e0;margin-top:7px}.bar>div{height:100%;background:var(--blue);width:0}.section-title{font-size:18px;font-weight:600;margin:0 0 14px}.tiny{font-size:12px;color:var(--muted)}
+    @media(max-width:900px){.c8,.c6,.c4,.c3{grid-column:span 12}.kpis{grid-template-columns:repeat(2,1fr)}.hero{flex-direction:column}}
   </style>
 </head>
 <body>
-  <h1>High Scale Cyber RAG</h1>
-  <p>MITRE ATT&CK + CAPEC → FastEmbed → Qdrant</p>
-  <textarea id="q" placeholder="Example: What techniques are related to credential access?"></textarea>
-  <br>
-  <button onclick="ask()">Ask</button>
-  <pre id="out"></pre>
-  <script>
-    async function ask() {
-      const q = document.getElementById('q').value;
-      const r = await fetch('/query', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query: q, top_k: 5, use_llm: true})
-      });
-      document.getElementById('out').textContent =
-        JSON.stringify(await r.json(), null, 2);
-    }
-  </script>
+<header>High Scale Cyber RAG <span>MITRE ATT&CK + CAPEC</span></header>
+<div class="wrap">
+  <div class="hero">
+    <div><h1>RAG Evaluation Console</h1><p>Query, retrieval quality, generation usage, latency and scale measurements in one UI.</p></div>
+    <div class="actions"><button class="secondary" onclick="ingest()">Ingest Knowledge</button><a class="btn secondary" href="/docs" target="_blank">Open API Docs</a></div>
+  </div>
+  <div id="globalStatus" class="status">Ready. Run ingestion once before querying a new Qdrant collection.</div>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="query">Query</div>
+    <div class="tab" data-tab="retrieval">Retrieval Evaluation</div>
+    <div class="tab" data-tab="performance">Performance</div>
+    <div class="tab" data-tab="scale">Scale Test</div>
+  </div>
+
+  <section id="query" class="panel active">
+    <div class="grid">
+      <div class="card c12">
+        <div class="section-title">Ask the Cyber RAG</div>
+        <textarea id="question" placeholder="Example: How can attackers dump credentials from operating system memory?"></textarea>
+        <div class="row" style="margin-top:12px">
+          <div class="field small"><label>Top K</label><select id="topK"><option>3</option><option selected>5</option><option>10</option><option>20</option></select></div>
+          <div class="check"><input id="useLlm" type="checkbox" checked><label for="useLlm" style="margin:0">Generate answer with OpenAI</label></div>
+          <button id="askBtn" onclick="ask()">Ask</button>
+        </div>
+      </div>
+      <div class="card c8"><div class="section-title">Answer</div><div id="answer" class="answer muted">No query yet.</div></div>
+      <div class="card c4"><div class="section-title">Last Query Performance</div><div id="queryKpis" class="tiny">Metrics appear after a query.</div></div>
+      <div class="card c12"><div class="section-title">Retrieved Sources</div><div id="sources" class="muted">No sources yet.</div></div>
+    </div>
+  </section>
+
+  <section id="retrieval" class="panel">
+    <div class="grid">
+      <div class="card c12">
+        <div class="section-title">Retrieval Benchmark</div>
+        <p class="muted">Runs 5 fixed MITRE ATT&CK questions with expected technique IDs and reports Hit@K and MRR.</p>
+        <div class="row"><div class="field small"><label>Top K</label><select id="evalTopK"><option>1</option><option selected>5</option><option>10</option></select></div><button id="evalBtn" onclick="runRetrievalEval()">Run Retrieval Benchmark</button></div>
+      </div>
+      <div class="card c12"><div class="kpis" id="retrievalKpis"><div class="kpi"><div class="l">Hit@K</div><div class="v">—</div></div><div class="kpi"><div class="l">MRR</div><div class="v">—</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">—</div></div></div></div>
+      <div class="card c12"><div class="section-title">Benchmark Details</div><div style="overflow:auto"><table><thead><tr><th>Question</th><th>Expected</th><th>Hit</th><th>Rank</th><th>Latency</th><th>Returned IDs</th></tr></thead><tbody id="evalRows"><tr><td colspan="6" class="muted">Run the benchmark to populate results.</td></tr></tbody></table></div></div>
+    </div>
+  </section>
+
+  <section id="performance" class="panel">
+    <div class="grid">
+      <div class="card c12"><div class="row"><div><div class="section-title">Service Performance</div><div class="tiny">Aggregated over the last 500 queries in this service process.</div></div><button class="secondary" onclick="refreshMetrics()">Refresh</button></div></div>
+      <div class="card c12"><div class="kpis" id="perfKpis"></div></div>
+      <div class="card c6"><div class="section-title">Latency</div><table><tbody id="latencyTable"></tbody></table></div>
+      <div class="card c6"><div class="section-title">Tokens & Resources</div><table><tbody id="resourceTable"></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="scale" class="panel">
+    <div class="grid">
+      <div class="card c12">
+        <div class="section-title">Load Test</div>
+        <p class="muted">Runs concurrent requests from this browser to the RAG API. Retrieval-only is best for infrastructure throughput; Full RAG also measures the external LLM path and consumes API tokens.</p>
+        <div class="row">
+          <div class="field small"><label>Total requests</label><input id="loadRequests" type="number" min="10" max="1000" value="100"></div>
+          <div class="field small"><label>Concurrency</label><input id="concurrency" type="number" min="1" max="100" value="10"></div>
+          <div class="field small"><label>Mode</label><select id="loadMode"><option value="false" selected>Retrieval only</option><option value="true">Full RAG + OpenAI</option></select></div>
+          <button id="loadBtn" onclick="runLoadTest()">Run Load Test</button>
+        </div>
+        <div class="bar"><div id="loadBar"></div></div><div id="loadProgress" class="tiny" style="margin-top:6px">Not started.</div>
+      </div>
+      <div class="card c12"><div class="kpis" id="scaleKpis"><div class="kpi"><div class="l">Throughput</div><div class="v">—</div></div><div class="kpi"><div class="l">Requests/hour</div><div class="v">—</div></div><div class="kpi"><div class="l">P95</div><div class="v">—</div></div><div class="kpi"><div class="l">P99</div><div class="v">—</div></div><div class="kpi"><div class="l">Error rate</div><div class="v">—</div></div></div></div>
+      <div class="card c12"><div class="section-title">Scale Benchmark</div><table><thead><tr><th>Metric</th><th>Current</th><th>Target</th><th>Result</th></tr></thead><tbody id="scaleBenchmark"><tr><td>Throughput</td><td>—</td><td>≥ 278 req/s (≈1M/hour)</td><td>—</td></tr><tr><td>P95 latency</td><td>—</td><td>&lt; 500 ms retrieval-only</td><td>—</td></tr><tr><td>Error rate</td><td>—</td><td>&lt; 1%</td><td>—</td></tr></tbody></table></div>
+    </div>
+  </section>
+</div>
+<script>
+const $=id=>document.getElementById(id); const fmt=(v,d=1)=>v==null?'—':Number(v).toFixed(d);
+function status(msg,error=false){$('globalStatus').textContent=msg;$('globalStatus').style.borderLeftColor=error?'#da1e28':'#0f62fe';}
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(t.dataset.tab).classList.add('active');if(t.dataset.tab==='performance')refreshMetrics();});
+async function ingest(){status('Ingesting MITRE/CAPEC into Qdrant...');try{const r=await fetch('/ingest',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ingest failed');status(`Ingestion completed: ${d.indexed||0} documents indexed into ${d.collection}.`);}catch(e){status(e.message,true)}}
+async function ask(){const q=$('question').value.trim();if(!q)return status('Enter a question first.',true);$('askBtn').disabled=true;status('Running RAG query...');try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,top_k:Number($('topK').value),use_llm:$('useLlm').checked})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Query failed');renderQuery(d);status('Query completed.');}catch(e){status(e.message,true)}finally{$('askBtn').disabled=false}}
+function renderQuery(d){const a=d.answer; $('answer').classList.remove('muted');$('answer').textContent=a?.text||a?.message||($('useLlm').checked?'No generated answer.':'Retrieval-only mode.');const p=d.performance||{};$('queryKpis').innerHTML=`<table><tbody><tr><td>Retrieval</td><td><b>${fmt(p.retrieval_ms,2)} ms</b></td></tr><tr><td>Generation</td><td><b>${fmt(p.generation_ms,2)} ms</b></td></tr><tr><td>End-to-end</td><td><b>${fmt(p.total_ms,2)} ms</b></td></tr><tr><td>Input tokens</td><td><b>${p.input_tokens??0}</b></td></tr><tr><td>Output tokens</td><td><b>${p.output_tokens??0}</b></td></tr></tbody></table>`;$('sources').innerHTML=(d.matches||[]).map((m,i)=>`<div class="source"><b>#${i+1} ${esc(m.id||'')} — ${esc(m.name||'')}</b><div class="tiny">${esc(m.source||'')} · similarity ${fmt(m.score,4)}</div><div>${esc((m.text||'').slice(0,500))}${(m.text||'').length>500?'…':''}</div></div>`).join('')||'<span class="muted">No matches.</span>';}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function runRetrievalEval(){$('evalBtn').disabled=true;status('Running retrieval benchmark...');try{const r=await fetch('/evaluate/retrieval',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({top_k:Number($('evalTopK').value)})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Benchmark failed');$('retrievalKpis').innerHTML=`<div class="kpi"><div class="l">Hit@${d.top_k}</div><div class="v">${fmt(d.hit_rate_at_k*100,0)}%</div></div><div class="kpi"><div class="l">MRR</div><div class="v">${fmt(d.mrr,3)}</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">${fmt(d.avg_retrieval_ms,1)} ms</div></div>`;$('evalRows').innerHTML=d.results.map(x=>`<tr><td>${esc(x.query)}</td><td><b>${esc(x.expected_id)}</b></td><td class="${x.hit?'good':'bad'}">${x.hit?'PASS':'MISS'}</td><td>${x.rank??'—'}</td><td>${fmt(x.latency_ms,1)} ms</td><td>${esc((x.returned_ids||[]).join(', '))}</td></tr>`).join('');status('Retrieval benchmark completed.');}catch(e){status(e.message,true)}finally{$('evalBtn').disabled=false}}
+async function refreshMetrics(){try{const r=await fetch('/metrics');const d=await r.json();const l=d.latency_ms||{},t=d.tokens||{},res=d.resources||{};$('perfKpis').innerHTML=`<div class="kpi"><div class="l">Queries</div><div class="v">${d.queries_recorded??0}</div></div><div class="kpi"><div class="l">P50 Total</div><div class="v">${fmt(l.p50_total)} ms</div></div><div class="kpi"><div class="l">P95 Total</div><div class="v">${fmt(l.p95_total)} ms</div></div><div class="kpi"><div class="l">P99 Total</div><div class="v">${fmt(l.p99_total)} ms</div></div><div class="kpi"><div class="l">Tokens</div><div class="v">${t.total??0}</div></div>`;$('latencyTable').innerHTML=`<tr><td>P50 retrieval</td><td>${fmt(l.p50_retrieval)} ms</td></tr><tr><td>P95 retrieval</td><td>${fmt(l.p95_retrieval)} ms</td></tr><tr><td>P50 generation</td><td>${fmt(l.p50_generation)} ms</td></tr><tr><td>P95 generation</td><td>${fmt(l.p95_generation)} ms</td></tr><tr><td>P95 end-to-end</td><td>${fmt(l.p95_total)} ms</td></tr>`;$('resourceTable').innerHTML=`<tr><td>Input tokens</td><td>${t.input??0}</td></tr><tr><td>Output tokens</td><td>${t.output??0}</td></tr><tr><td>Process CPU</td><td>${res.cpu_percent==null?'—':fmt(res.cpu_percent)+'%'}</td></tr><tr><td>Process memory</td><td>${res.memory_mb==null?'—':fmt(res.memory_mb)+' MB'}</td></tr><tr><td>System memory</td><td>${res.system_memory_percent==null?'—':fmt(res.system_memory_percent)+'%'}</td></tr>`;}catch(e){status('Metrics error: '+e.message,true)}}
+function pct(vals,p){if(!vals.length)return 0;const a=[...vals].sort((x,y)=>x-y),idx=(a.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);return a[lo]+(a[hi]-a[lo])*(idx-lo)}
+async function runLoadTest(){const total=Math.max(1,Number($('loadRequests').value)),conc=Math.max(1,Number($('concurrency').value)),useLlm=$('loadMode').value==='true';if(useLlm&&!confirm('Full RAG load test will call OpenAI for every request and consume API tokens. Continue?'))return;$('loadBtn').disabled=true;let next=0,done=0,errors=0,times=[];$('loadBar').style.width='0%';const started=performance.now();const worker=async()=>{while(true){const i=next++;if(i>=total)return;const t0=performance.now();try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'What ATT&CK technique covers credential dumping?',top_k:5,use_llm:useLlm})});if(!r.ok)errors++;await r.json();}catch(e){errors++}times.push(performance.now()-t0);done++;$('loadBar').style.width=`${done/total*100}%`;$('loadProgress').textContent=`${done}/${total} completed`;}};status(`Running ${total} requests with concurrency ${conc}...`);await Promise.all(Array.from({length:Math.min(conc,total)},worker));const sec=(performance.now()-started)/1000,rps=total/sec,rph=rps*3600,p50=pct(times,.5),p95=pct(times,.95),p99=pct(times,.99),er=errors/total;$('scaleKpis').innerHTML=`<div class="kpi"><div class="l">Throughput</div><div class="v">${fmt(rps,1)} rps</div></div><div class="kpi"><div class="l">Requests/hour</div><div class="v">${(rph/1e6).toFixed(2)}M</div></div><div class="kpi"><div class="l">P95</div><div class="v">${fmt(p95,0)} ms</div></div><div class="kpi"><div class="l">P99</div><div class="v">${fmt(p99,0)} ms</div></div><div class="kpi"><div class="l">Error rate</div><div class="v">${fmt(er*100,2)}%</div></div>`;const passR=rps>=278,passL=useLlm?null:p95<500,passE=er<.01;$('scaleBenchmark').innerHTML=`<tr><td>Throughput</td><td>${fmt(rps,1)} req/s</td><td>≥ 278 req/s (≈1M/hour)</td><td class="${passR?'good':'bad'}">${passR?'PASS':'FAIL'}</td></tr><tr><td>P95 latency</td><td>${fmt(p95,0)} ms</td><td>${useLlm?'Informational for Full RAG':'< 500 ms retrieval-only'}</td><td class="${passL===null?'':' '+(passL?'good':'bad')}">${passL===null?'INFO':passL?'PASS':'FAIL'}</td></tr><tr><td>Error rate</td><td>${fmt(er*100,2)}%</td><td>< 1%</td><td class="${passE?'good':'bad'}">${passE?'PASS':'FAIL'}</td></tr>`;$('loadProgress').textContent=`Completed ${total} requests in ${fmt(sec,2)} s.`;status('Load test completed.');$('loadBtn').disabled=false;refreshMetrics()}
+refreshMetrics();
+</script>
 </body>
 </html>
