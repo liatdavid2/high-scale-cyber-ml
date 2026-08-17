@@ -1,8 +1,175 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Monitoring</title><link rel="stylesheet" href="/static/style.css"></head><body><main class="page">
-<header><div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 7</div><h1>Monitoring & Model Evaluation</h1><p>Production telemetry, drift, confidence, latency, reliability, and periodic labeled quality checks.</p></header>
-<section class="panel"><h2>Monitoring Evaluations</h2><div class="cards"><div><span>p95 Latency</span><strong id="p95">-</strong></div><div><span>Error Rate</span><strong id="errorRate">-</strong></div><div><span>Attack Prediction Rate</span><strong id="attackRate">-</strong></div><div><span>Avg Confidence</span><strong id="confidence">-</strong></div><div><span>Low Confidence</span><strong id="lowConfidence">-</strong></div><div><span>Telemetry Samples</span><strong id="samples">0</strong></div></div></section>
-<section class="panel"><div class="title-row"><h2>Feature Drift</h2><button id="refresh">Refresh Monitoring</button></div><table><thead><tr><th>Feature</th><th>PSI</th><th>KS Statistic</th><th>Drift Level</th></tr></thead><tbody id="drift"><tr><td colspan="4">No data yet.</td></tr></tbody></table><p class="hint">PSI &lt; 0.10 low, 0.10–0.25 medium, ≥0.25 high. KS provides a second distribution-shift signal.</p></section>
-<section class="panel"><h2>Active Alerts</h2><div id="alerts" class="alerts">No alerts.</div></section>
-<section class="panel quality"><div class="title-row"><div><h2>Periodic Ground-Truth Quality Check</h2><p class="hint">Run only when you want to verify the deployed champion against labeled test data.</p></div><button id="quality">Run Labeled Quality Check</button></div><div id="qualityResult" class="quality-grid hidden"><div><span>PR-AUC</span><strong id="pr">-</strong></div><div><span>ROC-AUC</span><strong id="roc">-</strong></div><div><span>F1</span><strong id="f1">-</strong></div><div><span>Recall</span><strong id="recall">-</strong></div><div><span>Precision</span><strong id="precision">-</strong></div><div><span>API Errors</span><strong id="qualityErrors">-</strong></div></div></section>
-<section class="panel"><h2>Evaluation Strategy</h2><table><tbody><tr><th>Always On</th><td>Latency, throughput, error rate, confidence, prediction distribution, feature drift</td></tr><tr><th>Periodic / New Labels</th><td>PR-AUC, ROC-AUC, F1, Recall, Precision</td></tr><tr><th>Drift Signals</th><td>PSI + KS per feature</td></tr></tbody></table></section>
-</main><script src="/static/app.js"></script></body></html>
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Monitoring & Model Evaluation</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main class="page">
+<header>
+  <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 7</div>
+  <h1>Monitoring & Model Evaluation</h1>
+  <p>Three independent views: serving health, CSV data drift, and labeled model-quality monitoring.</p>
+</header>
+
+<section class="panel serving">
+  <div class="section-number">1</div>
+  <div class="section-head">
+    <div>
+      <h2>Inference Serving Health</h2>
+      <p>Is the deployed API serving predictions reliably and fast?</p>
+    </div>
+  </div>
+  <div class="cards">
+    <div><span>Model Loaded</span><strong id="modelLoaded">-</strong></div>
+    <div><span>p50 Latency</span><strong id="p50">0 ms</strong></div>
+    <div><span>p95 Latency</span><strong id="p95">0 ms</strong></div>
+    <div><span>p99 Latency</span><strong id="p99">0 ms</strong></div>
+    <div><span>Throughput</span><strong id="throughput">0 rps</strong></div>
+    <div><span>Error Rate</span><strong id="errorRate">0%</strong></div>
+  </div>
+  <table class="meta">
+    <tbody>
+      <tr><th>Model URI</th><td id="modelUri">-</td></tr>
+      <tr><th>Total Requests</th><td id="requests">0</td></tr>
+      <tr><th>Successful Predictions</th><td id="success">0</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel drift">
+  <div class="section-number">2</div>
+  <div class="section-head">
+    <div>
+      <h2>CSV Data Drift Evaluation</h2>
+      <p>Is the current dataset distribution different from the data used as the training reference?</p>
+    </div>
+  </div>
+
+  <div class="data-source-grid">
+    <div>
+      <span>Baseline Dataset</span>
+      <strong>UNSW_NB15_training-set.csv</strong>
+      <small>Reference distribution</small>
+    </div>
+    <div class="arrow">→</div>
+    <div>
+      <span>Current Dataset</span>
+      <strong>UNSW_NB15_testing-set.csv</strong>
+      <small>Current evaluation batch</small>
+    </div>
+  </div>
+
+  <div class="controls">
+    <label>Rows per dataset
+      <select id="driftRows">
+        <option value="5000">5,000</option>
+        <option value="10000">10,000</option>
+        <option value="20000" selected>20,000</option>
+        <option value="40000">40,000</option>
+        <option value="80000">80,000</option>
+      </select>
+    </label>
+    <button id="runDrift">Run Drift Evaluation</button>
+  </div>
+  <div id="driftStatus" class="status-text">Not run yet.</div>
+
+  <div id="driftSummary" class="cards summary hidden">
+    <div><span>Overall Drift</span><strong id="overallDrift">-</strong></div>
+    <div><span>Baseline Rows</span><strong id="baselineRows">-</strong></div>
+    <div><span>Current Rows</span><strong id="currentRows">-</strong></div>
+    <div><span>High Features</span><strong id="highFeatures">-</strong></div>
+    <div><span>Medium Features</span><strong id="mediumFeatures">-</strong></div>
+    <div><span>Low Features</span><strong id="lowFeatures">-</strong></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Feature</th><th>PSI</th><th>KS Statistic</th><th>KS p-value</th><th>Drift Level</th></tr>
+    </thead>
+    <tbody id="driftResults">
+      <tr><td colspan="5">Run the CSV drift evaluation to see results.</td></tr>
+    </tbody>
+  </table>
+  <p class="hint">PSI: &lt;0.10 LOW, 0.10–0.25 MEDIUM, ≥0.25 HIGH. KS provides a second distribution-shift signal.</p>
+</section>
+
+<section class="panel quality">
+  <div class="section-number">3</div>
+  <div class="section-head">
+    <div>
+      <h2>Labeled Model Quality Check</h2>
+      <p>When labels are available, is the deployed champion maintaining prediction quality?</p>
+    </div>
+  </div>
+
+  <div class="data-source-grid">
+    <div>
+      <span>Reference Quality</span>
+      <strong>Training CSV labeled sample</strong>
+      <small>Baseline model behavior</small>
+    </div>
+    <div class="arrow">→</div>
+    <div>
+      <span>Current Quality</span>
+      <strong>Testing CSV labeled sample</strong>
+      <small>Current labeled batch</small>
+    </div>
+  </div>
+
+  <div class="controls">
+    <label>Rows per quality sample
+      <select id="qualityRows">
+        <option value="500">500 quick</option>
+        <option value="1000">1,000</option>
+        <option value="2000" selected>2,000</option>
+        <option value="5000">5,000</option>
+      </select>
+    </label>
+    <button id="runQuality">Run Labeled Quality Check</button>
+  </div>
+  <div id="qualityStatus" class="status-text">Not run yet.</div>
+
+  <div id="qualityPanel" class="hidden">
+    <table>
+      <thead>
+        <tr><th>Metric</th><th>Reference</th><th>Current</th><th>Change</th></tr>
+      </thead>
+      <tbody id="qualityResults"></tbody>
+    </table>
+
+    <div class="cards summary">
+      <div><span>Current PR-AUC</span><strong id="qPr">-</strong></div>
+      <div><span>Current ROC-AUC</span><strong id="qRoc">-</strong></div>
+      <div><span>Current F1</span><strong id="qF1">-</strong></div>
+      <div><span>Current Recall</span><strong id="qRecall">-</strong></div>
+      <div><span>Current FPR</span><strong id="qFpr">-</strong></div>
+      <div><span>Current FNR</span><strong id="qFnr">-</strong></div>
+    </div>
+
+    <table class="meta">
+      <tbody>
+        <tr><th>Current confusion matrix</th><td id="confusion">-</td></tr>
+        <tr><th>Current API errors</th><td id="qualityErrors">-</td></tr>
+        <tr><th>Current p95 inference</th><td id="qualityP95">-</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel strategy">
+  <h2>Monitoring Strategy</h2>
+  <table>
+    <tbody>
+      <tr><th>Always On</th><td>Latency, throughput, error rate, model availability.</td></tr>
+      <tr><th>Batch Data Check</th><td>PSI + KS between training reference CSV and current/testing CSV.</td></tr>
+      <tr><th>When Labels Arrive</th><td>PR-AUC, ROC-AUC, F1, Recall, Precision, FPR, FNR and change versus reference quality.</td></tr>
+    </tbody>
+  </table>
+</section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>
