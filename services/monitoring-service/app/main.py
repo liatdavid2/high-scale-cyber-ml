@@ -1,4 +1,5 @@
 
+import io
 import os
 import time
 from pathlib import Path
@@ -6,28 +7,31 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 from scipy.stats import ks_2samp
 from sklearn.metrics import (
     average_precision_score,
-    roc_auc_score,
-    f1_score,
-    recall_score,
-    precision_score,
     confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 DATA_DIR = Path(os.getenv("DATA_DIR", "/shared/data/raw"))
 INFERENCE_URL = os.getenv("INFERENCE_URL", "http://inference-service:8000").rstrip("/")
 
-TRAIN_NAMES = ["UNSW_NB15_training-set.csv", "UNSW_NB15_training_set.csv"]
-TEST_NAMES = ["UNSW_NB15_testing-set.csv", "UNSW_NB15_testing_set.csv"]
+TRAIN_NAMES = [
+    "UNSW_NB15_training-set.csv",
+    "UNSW_NB15_training_set.csv",
+]
 
-FEATURES = [
+RAW_REQUIRED = ["dur", "rate", "sbytes", "dbytes", "spkts", "dpkts"]
+
+MODEL_FEATURES = [
     "dur",
     "rate",
     "total_bytes",
@@ -37,35 +41,32 @@ FEATURES = [
     "bytes_per_packet",
 ]
 
-app = FastAPI(title="Monitoring Service", version="3.0.0")
+LABEL_CANDIDATES = ["label", "target", "class", "y"]
+
+app = FastAPI(title="Monitoring Service", version="4.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-class DriftRequest(BaseModel):
-    sample_size: int = Field(default=20000, ge=1000, le=80000)
-
-
-class QualityRequest(BaseModel):
-    baseline_rows: int = Field(default=2000, ge=500, le=10000)
-    current_rows: int = Field(default=2000, ge=500, le=10000)
-
-
-def find_file(names):
-    for name in names:
+def find_training_file():
+    for name in TRAIN_NAMES:
         path = DATA_DIR / name
         if path.exists():
             return path
-    raise FileNotFoundError(f"Could not find one of {names} in {DATA_DIR}")
+    raise FileNotFoundError(
+        f"Training baseline not found in {DATA_DIR}. Expected one of: {TRAIN_NAMES}"
+    )
 
 
-def build_features(df):
-    required = ["dur", "rate", "sbytes", "dbytes", "spkts", "dpkts"]
-    missing = [c for c in required if c not in df.columns]
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    missing = [c for c in RAW_REQUIRED if c not in df.columns]
     if missing:
-        raise ValueError(f"Missing required columns: {missing}")
+        raise ValueError(
+            "CSV schema is incompatible. Missing raw columns required for monitoring: "
+            + ", ".join(missing)
+        )
 
-    d = df[required].copy()
-    for col in required:
+    d = df[RAW_REQUIRED].copy()
+    for col in RAW_REQUIRED:
         d[col] = pd.to_numeric(d[col], errors="coerce").fillna(0)
 
     total_bytes = d["sbytes"] + d["dbytes"]
@@ -82,9 +83,20 @@ def build_features(df):
     })
 
 
+def detect_label_column(df: pd.DataFrame):
+    lower_map = {str(c).lower(): c for c in df.columns}
+    for candidate in LABEL_CANDIDATES:
+        if candidate in lower_map:
+            return lower_map[candidate]
+    return None
+
+
 def psi(expected, actual, bins=10):
     expected = np.asarray(expected, dtype=float)
     actual = np.asarray(actual, dtype=float)
+
+    expected = expected[np.isfinite(expected)]
+    actual = actual[np.isfinite(actual)]
 
     if len(expected) < 2 or len(actual) < 2:
         return 0.0
@@ -97,28 +109,28 @@ def psi(expected, actual, bins=10):
     edges[0] = -np.inf
     edges[-1] = np.inf
 
-    expected_count, _ = np.histogram(expected, bins=edges)
-    actual_count, _ = np.histogram(actual, bins=edges)
+    e_count, _ = np.histogram(expected, bins=edges)
+    a_count, _ = np.histogram(actual, bins=edges)
 
-    expected_pct = np.clip(expected_count / max(expected_count.sum(), 1), 1e-6, None)
-    actual_pct = np.clip(actual_count / max(actual_count.sum(), 1), 1e-6, None)
+    e_pct = np.clip(e_count / max(e_count.sum(), 1), 1e-6, None)
+    a_pct = np.clip(a_count / max(a_count.sum(), 1), 1e-6, None)
 
-    return float(np.sum((actual_pct - expected_pct) * np.log(actual_pct / expected_pct)))
+    return float(np.sum((a_pct - e_pct) * np.log(a_pct / e_pct)))
 
 
-def drift_level(value):
-    if value >= 0.25:
+def drift_level(psi_value):
+    if psi_value >= 0.25:
         return "HIGH"
-    if value >= 0.10:
+    if psi_value >= 0.10:
         return "MEDIUM"
     return "LOW"
 
 
-def inference_eval():
+def fetch_serving():
     try:
-        response = requests.get(f"{INFERENCE_URL}/api/evaluation", timeout=5)
-        response.raise_for_status()
-        return response.json()
+        r = requests.get(f"{INFERENCE_URL}/api/evaluation", timeout=5)
+        r.raise_for_status()
+        return r.json()
     except Exception as exc:
         return {
             "model_loaded": False,
@@ -134,56 +146,72 @@ def inference_eval():
         }
 
 
-def predict_batch(X):
+def predict_batch(X: pd.DataFrame):
     probabilities = []
     predictions = []
-    api_errors = 0
-    latency_ms = []
+    errors = 0
+    latencies = []
 
     for _, row in X.iterrows():
         started = time.perf_counter()
         try:
             response = requests.post(
                 f"{INFERENCE_URL}/api/predict",
-                json={k: float(row[k]) for k in FEATURES},
+                json={name: float(row[name]) for name in MODEL_FEATURES},
                 timeout=10,
             )
             response.raise_for_status()
             result = response.json()
             probabilities.append(float(result["probability"]))
             predictions.append(int(result["prediction"]))
-            latency_ms.append((time.perf_counter() - started) * 1000)
+            latencies.append((time.perf_counter() - started) * 1000)
         except Exception:
-            api_errors += 1
+            errors += 1
             probabilities.append(0.0)
             predictions.append(0)
 
     return (
         np.asarray(probabilities, dtype=float),
         np.asarray(predictions, dtype=int),
-        api_errors,
-        latency_ms,
+        errors,
+        latencies,
     )
 
 
 def quality_metrics(y_true, probabilities, predictions):
-    tn, fp, fn, tp = confusion_matrix(y_true, predictions, labels=[0, 1]).ravel()
-    fpr = fp / max(fp + tn, 1)
-    fnr = fn / max(fn + tp, 1)
+    unique = np.unique(y_true)
+    if not set(unique).issubset({0, 1}):
+        raise ValueError(
+            f"Detected label column is not binary. Found values: {unique[:10].tolist()}"
+        )
 
-    return {
-        "pr_auc": float(average_precision_score(y_true, probabilities)),
-        "roc_auc": float(roc_auc_score(y_true, probabilities)),
+    tn, fp, fn, tp = confusion_matrix(y_true, predictions, labels=[0, 1]).ravel()
+
+    result = {
         "f1": float(f1_score(y_true, predictions, zero_division=0)),
         "recall": float(recall_score(y_true, predictions, zero_division=0)),
         "precision": float(precision_score(y_true, predictions, zero_division=0)),
-        "fpr": float(fpr),
-        "fnr": float(fnr),
+        "fpr": float(fp / max(fp + tn, 1)),
+        "fnr": float(fn / max(fn + tp, 1)),
         "tn": int(tn),
         "fp": int(fp),
         "fn": int(fn),
         "tp": int(tp),
     }
+
+    if len(unique) == 2:
+        result["pr_auc"] = float(average_precision_score(y_true, probabilities))
+        result["roc_auc"] = float(roc_auc_score(y_true, probabilities))
+    else:
+        result["pr_auc"] = None
+        result["roc_auc"] = None
+
+    return result
+
+
+def format_pvalue(value):
+    # Return enough precision for the UI to show decimals such as 0.0003.
+    return round(float(value), 6)
 
 
 @app.get("/")
@@ -196,118 +224,133 @@ def health():
     return {
         "status": "ok",
         "service": "monitoring-service",
-        "data_dir": str(DATA_DIR),
+        "baseline": str(find_training_file()),
         "inference_url": INFERENCE_URL,
     }
 
 
 @app.get("/api/serving")
 def serving():
-    return inference_eval()
+    return fetch_serving()
 
 
-@app.post("/api/drift")
-def run_drift(request: DriftRequest):
+@app.post("/api/evaluate-csv")
+async def evaluate_csv(file: UploadFile = File(...)):
+    filename = file.filename or "uploaded.csv"
+
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a CSV file.")
+
     try:
-        train_path = find_file(TRAIN_NAMES)
-        test_path = find_file(TEST_NAMES)
+        raw = await file.read()
+        current_df = pd.read_csv(io.BytesIO(raw))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read CSV: {exc}")
 
-        train_df = pd.read_csv(train_path)
-        test_df = pd.read_csv(test_path)
+    if current_df.empty:
+        raise HTTPException(status_code=400, detail="Uploaded CSV is empty.")
 
-        baseline_n = min(request.sample_size, len(train_df))
-        current_n = min(request.sample_size, len(test_df))
+    try:
+        baseline_path = find_training_file()
+        baseline_df = pd.read_csv(baseline_path)
 
-        baseline_raw = train_df.sample(n=baseline_n, random_state=42)
-        current_raw = test_df.sample(n=current_n, random_state=43)
+        baseline_features = build_features(baseline_df)
+        current_features = build_features(current_df)
 
-        baseline = build_features(baseline_raw)
-        current = build_features(current_raw)
+        sample_size = min(len(baseline_features), len(current_features), 20000)
+        if sample_size < 100:
+            raise ValueError("At least 100 compatible rows are required for drift evaluation.")
 
-        results = []
-        counts = {"HIGH": 0, "MEDIUM": 0, "LOW": 0}
+        baseline_sample = baseline_features.sample(n=sample_size, random_state=42)
+        current_sample = current_features.sample(n=sample_size, random_state=43)
 
-        for feature in FEATURES:
-            psi_value = psi(baseline[feature], current[feature])
-            ks_result = ks_2samp(baseline[feature], current[feature])
+        drift_rows = []
+        counts = {"LOW": 0, "MEDIUM": 0, "HIGH": 0}
+
+        for feature in MODEL_FEATURES:
+            psi_value = psi(baseline_sample[feature], current_sample[feature])
+            ks = ks_2samp(baseline_sample[feature], current_sample[feature])
             level = drift_level(psi_value)
             counts[level] += 1
 
-            results.append({
+            drift_rows.append({
                 "feature": feature,
                 "psi": round(psi_value, 4),
-                "ks_statistic": round(float(ks_result.statistic), 4),
-                "ks_pvalue": round(float(ks_result.pvalue), 6),
+                "ks_statistic": round(float(ks.statistic), 4),
+                "ks_pvalue": format_pvalue(ks.pvalue),
                 "drift_level": level,
             })
 
-        overall = "HIGH" if counts["HIGH"] else ("MEDIUM" if counts["MEDIUM"] else "LOW")
+        overall = (
+            "HIGH"
+            if counts["HIGH"] > 0
+            else "MEDIUM"
+            if counts["MEDIUM"] > 0
+            else "LOW"
+        )
 
-        return {
-            "baseline_dataset": train_path.name,
-            "current_dataset": test_path.name,
-            "baseline_rows": baseline_n,
-            "current_rows": current_n,
-            "overall_drift": overall,
-            "high_features": counts["HIGH"],
-            "medium_features": counts["MEDIUM"],
-            "low_features": counts["LOW"],
-            "results": results,
-            "evaluated_at": int(time.time()),
+        label_column = detect_label_column(current_df)
+
+        response = {
+            "file": {
+                "name": filename,
+                "rows": int(len(current_df)),
+                "columns": int(len(current_df.columns)),
+                "schema_valid": True,
+                "label_found": label_column is not None,
+                "label_column": str(label_column) if label_column is not None else None,
+            },
+            "drift": {
+                "baseline_dataset": baseline_path.name,
+                "current_dataset": filename,
+                "rows_compared": sample_size,
+                "overall_drift": overall,
+                "high_features": counts["HIGH"],
+                "medium_features": counts["MEDIUM"],
+                "low_features": counts["LOW"],
+                "results": drift_rows,
+                "rule": "PSI determines drift severity; KS is shown as supporting statistical evidence.",
+            },
+            "quality": None,
         }
 
+        if label_column is not None:
+            quality_n = min(len(current_df), 2000)
+            labeled = current_df.sample(n=quality_n, random_state=99).copy()
+            X = build_features(labeled)
+            y = pd.to_numeric(labeled[label_column], errors="coerce")
+
+            valid = y.notna()
+            X = X.loc[valid].reset_index(drop=True)
+            y = y.loc[valid].astype(int).to_numpy()
+
+            if len(y) >= 100:
+                probabilities, predictions, api_errors, latency_ms = predict_batch(X)
+                metrics = quality_metrics(y, probabilities, predictions)
+
+                response["quality"] = {
+                    "available": True,
+                    "label_column": str(label_column),
+                    "rows_evaluated": int(len(y)),
+                    "api_errors": int(api_errors),
+                    "p95_inference_ms": round(
+                        float(np.percentile(latency_ms, 95)), 3
+                    ) if latency_ms else 0,
+                    **{
+                        key: round(value, 4) if isinstance(value, float) else value
+                        for key, value in metrics.items()
+                    },
+                }
+            else:
+                response["quality"] = {
+                    "available": False,
+                    "reason": "Too few valid labeled rows after label parsing.",
+                    "label_column": str(label_column),
+                }
+
+        return response
+
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/api/quality")
-def run_quality(request: QualityRequest):
-    try:
-        train_path = find_file(TRAIN_NAMES)
-        test_path = find_file(TEST_NAMES)
-
-        train_df = pd.read_csv(train_path)
-        test_df = pd.read_csv(test_path)
-
-        if "label" not in train_df.columns or "label" not in test_df.columns:
-            raise ValueError("Both CSV files must contain the label column.")
-
-        baseline_n = min(request.baseline_rows, len(train_df))
-        current_n = min(request.current_rows, len(test_df))
-
-        baseline_raw = train_df.sample(n=baseline_n, random_state=101)
-        current_raw = test_df.sample(n=current_n, random_state=102)
-
-        baseline_X = build_features(baseline_raw)
-        current_X = build_features(current_raw)
-        baseline_y = pd.to_numeric(baseline_raw["label"], errors="coerce").fillna(0).astype(int).to_numpy()
-        current_y = pd.to_numeric(current_raw["label"], errors="coerce").fillna(0).astype(int).to_numpy()
-
-        baseline_prob, baseline_pred, baseline_errors, baseline_lat = predict_batch(baseline_X)
-        current_prob, current_pred, current_errors, current_lat = predict_batch(current_X)
-
-        baseline_metrics = quality_metrics(baseline_y, baseline_prob, baseline_pred)
-        current_metrics = quality_metrics(current_y, current_prob, current_pred)
-
-        changes = {}
-        for metric in ["pr_auc", "roc_auc", "f1", "recall", "precision", "fpr", "fnr"]:
-            changes[metric] = current_metrics[metric] - baseline_metrics[metric]
-
-        return {
-            "baseline_dataset": train_path.name,
-            "current_dataset": test_path.name,
-            "baseline_rows": baseline_n,
-            "current_rows": current_n,
-            "baseline": {k: round(v, 4) if isinstance(v, float) else v for k, v in baseline_metrics.items()},
-            "current": {k: round(v, 4) if isinstance(v, float) else v for k, v in current_metrics.items()},
-            "change": {k: round(v, 4) for k, v in changes.items()},
-            "baseline_api_errors": baseline_errors,
-            "current_api_errors": current_errors,
-            "baseline_p95_ms": round(float(np.percentile(baseline_lat, 95)), 3) if baseline_lat else 0,
-            "current_p95_ms": round(float(np.percentile(current_lat, 95)), 3) if current_lat else 0,
-            "checked_at": int(time.time()),
-            "note": "Reference quality uses a labeled sample from the training CSV; current quality uses a labeled sample from the testing CSV.",
-        }
-
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc))

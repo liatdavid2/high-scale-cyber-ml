@@ -9,19 +9,15 @@
 <body>
 <main class="page">
 <header>
-  <div class="eyebrow">HIGH-SCALE-CYBER-ML · STAGE 7</div>
+  <div class="eyebrow">HIGH-SCALE-CYBER-ML · MONITORING</div>
   <h1>Monitoring & Model Evaluation</h1>
-  <p>Three independent views: serving health, CSV data drift, and labeled model-quality monitoring.</p>
+  <p>Upload a current CSV batch. Data drift is always evaluated; model quality is added automatically when a label column exists.</p>
 </header>
 
 <section class="panel serving">
   <div class="section-number">1</div>
-  <div class="section-head">
-    <div>
-      <h2>Inference Serving Health</h2>
-      <p>Is the deployed API serving predictions reliably and fast?</p>
-    </div>
-  </div>
+  <h2>Inference Serving Health</h2>
+  <p class="hint">Live serving metrics from the deployed Inference Service. These metrics are independent of the uploaded CSV drift analysis.</p>
   <div class="cards">
     <div><span>Model Loaded</span><strong id="modelLoaded">-</strong></div>
     <div><span>p50 Latency</span><strong id="p50">0 ms</strong></div>
@@ -30,56 +26,53 @@
     <div><span>Throughput</span><strong id="throughput">0 rps</strong></div>
     <div><span>Error Rate</span><strong id="errorRate">0%</strong></div>
   </div>
-  <table class="meta">
-    <tbody>
-      <tr><th>Model URI</th><td id="modelUri">-</td></tr>
-      <tr><th>Total Requests</th><td id="requests">0</td></tr>
-      <tr><th>Successful Predictions</th><td id="success">0</td></tr>
-    </tbody>
-  </table>
 </section>
 
-<section class="panel drift">
+<section class="panel upload">
   <div class="section-number">2</div>
-  <div class="section-head">
-    <div>
-      <h2>CSV Data Drift Evaluation</h2>
-      <p>Is the current dataset distribution different from the data used as the training reference?</p>
-    </div>
+  <h2>Upload Current CSV</h2>
+  <p class="hint">
+    Reference is fixed to <strong>UNSW_NB15_training-set.csv</strong>.
+    The uploaded CSV becomes the current batch.
+  </p>
+
+  <div class="upload-row">
+    <input id="csvFile" type="file" accept=".csv,text/csv">
+    <button id="evaluate">Evaluate Current CSV</button>
   </div>
+  <div id="uploadStatus" class="status-text">Choose a CSV file.</div>
+
+  <div id="fileInfo" class="file-grid hidden">
+    <div><span>Current File</span><strong id="fileName">-</strong></div>
+    <div><span>Rows</span><strong id="fileRows">-</strong></div>
+    <div><span>Columns</span><strong id="fileColumns">-</strong></div>
+    <div><span>Schema</span><strong id="schemaValid">-</strong></div>
+    <div><span>Label</span><strong id="labelFound">-</strong></div>
+  </div>
+</section>
+
+<section id="driftPanel" class="panel drift hidden">
+  <div class="section-number">3</div>
+  <h2>CSV Data Drift Evaluation</h2>
+  <p class="hint">Compares the training reference distribution with the uploaded current CSV. Manual prediction inputs are never used.</p>
 
   <div class="data-source-grid">
     <div>
-      <span>Baseline Dataset</span>
-      <strong>UNSW_NB15_training-set.csv</strong>
-      <small>Reference distribution</small>
+      <span>Baseline</span>
+      <strong id="baselineName">UNSW_NB15_training-set.csv</strong>
+      <small>Training reference</small>
     </div>
     <div class="arrow">→</div>
     <div>
-      <span>Current Dataset</span>
-      <strong>UNSW_NB15_testing-set.csv</strong>
-      <small>Current evaluation batch</small>
+      <span>Current</span>
+      <strong id="currentName">Uploaded CSV</strong>
+      <small>Current batch</small>
     </div>
   </div>
 
-  <div class="controls">
-    <label>Rows per dataset
-      <select id="driftRows">
-        <option value="5000">5,000</option>
-        <option value="10000">10,000</option>
-        <option value="20000" selected>20,000</option>
-        <option value="40000">40,000</option>
-        <option value="80000">80,000</option>
-      </select>
-    </label>
-    <button id="runDrift">Run Drift Evaluation</button>
-  </div>
-  <div id="driftStatus" class="status-text">Not run yet.</div>
-
-  <div id="driftSummary" class="cards summary hidden">
+  <div class="cards summary">
+    <div><span>Rows Compared</span><strong id="rowsCompared">-</strong></div>
     <div><span>Overall Drift</span><strong id="overallDrift">-</strong></div>
-    <div><span>Baseline Rows</span><strong id="baselineRows">-</strong></div>
-    <div><span>Current Rows</span><strong id="currentRows">-</strong></div>
     <div><span>High Features</span><strong id="highFeatures">-</strong></div>
     <div><span>Medium Features</span><strong id="mediumFeatures">-</strong></div>
     <div><span>Low Features</span><strong id="lowFeatures">-</strong></div>
@@ -87,88 +80,56 @@
 
   <table>
     <thead>
-      <tr><th>Feature</th><th>PSI</th><th>KS Statistic</th><th>KS p-value</th><th>Drift Level</th></tr>
+      <tr>
+        <th>Feature</th>
+        <th>PSI</th>
+        <th>KS Statistic</th>
+        <th>KS p-value</th>
+        <th>Drift Level</th>
+      </tr>
     </thead>
-    <tbody id="driftResults">
-      <tr><td colspan="5">Run the CSV drift evaluation to see results.</td></tr>
-    </tbody>
+    <tbody id="driftResults"></tbody>
   </table>
-  <p class="hint">PSI: &lt;0.10 LOW, 0.10–0.25 MEDIUM, ≥0.25 HIGH. KS provides a second distribution-shift signal.</p>
+  <p class="hint"><strong>Decision:</strong> PSI determines LOW / MEDIUM / HIGH severity. KS is a supporting statistical signal. No arbitrary 50/50 weighting is used.</p>
 </section>
 
-<section class="panel quality">
-  <div class="section-number">3</div>
-  <div class="section-head">
-    <div>
-      <h2>Labeled Model Quality Check</h2>
-      <p>When labels are available, is the deployed champion maintaining prediction quality?</p>
-    </div>
+<section id="qualityPanel" class="panel quality hidden">
+  <div class="section-number">4</div>
+  <h2>Labeled Model Quality Check</h2>
+  <p class="hint">Automatically shown only when the uploaded CSV contains a compatible label column. The labeled rows are sent through the deployed Inference API.</p>
+
+  <div class="cards">
+    <div><span>PR-AUC</span><strong id="prAuc">-</strong></div>
+    <div><span>ROC-AUC</span><strong id="rocAuc">-</strong></div>
+    <div><span>F1</span><strong id="f1">-</strong></div>
+    <div><span>Recall</span><strong id="recall">-</strong></div>
+    <div><span>Precision</span><strong id="precision">-</strong></div>
+    <div><span>p95 Inference</span><strong id="qualityP95">-</strong></div>
   </div>
 
-  <div class="data-source-grid">
-    <div>
-      <span>Reference Quality</span>
-      <strong>Training CSV labeled sample</strong>
-      <small>Baseline model behavior</small>
-    </div>
-    <div class="arrow">→</div>
-    <div>
-      <span>Current Quality</span>
-      <strong>Testing CSV labeled sample</strong>
-      <small>Current labeled batch</small>
-    </div>
-  </div>
-
-  <div class="controls">
-    <label>Rows per quality sample
-      <select id="qualityRows">
-        <option value="500">500 quick</option>
-        <option value="1000">1,000</option>
-        <option value="2000" selected>2,000</option>
-        <option value="5000">5,000</option>
-      </select>
-    </label>
-    <button id="runQuality">Run Labeled Quality Check</button>
-  </div>
-  <div id="qualityStatus" class="status-text">Not run yet.</div>
-
-  <div id="qualityPanel" class="hidden">
-    <table>
-      <thead>
-        <tr><th>Metric</th><th>Reference</th><th>Current</th><th>Change</th></tr>
-      </thead>
-      <tbody id="qualityResults"></tbody>
-    </table>
-
-    <div class="cards summary">
-      <div><span>Current PR-AUC</span><strong id="qPr">-</strong></div>
-      <div><span>Current ROC-AUC</span><strong id="qRoc">-</strong></div>
-      <div><span>Current F1</span><strong id="qF1">-</strong></div>
-      <div><span>Current Recall</span><strong id="qRecall">-</strong></div>
-      <div><span>Current FPR</span><strong id="qFpr">-</strong></div>
-      <div><span>Current FNR</span><strong id="qFnr">-</strong></div>
-    </div>
-
-    <table class="meta">
-      <tbody>
-        <tr><th>Current confusion matrix</th><td id="confusion">-</td></tr>
-        <tr><th>Current API errors</th><td id="qualityErrors">-</td></tr>
-        <tr><th>Current p95 inference</th><td id="qualityP95">-</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <table class="meta">
+    <tbody>
+      <tr><th>Label column</th><td id="qualityLabel">-</td></tr>
+      <tr><th>Rows evaluated</th><td id="qualityRows">-</td></tr>
+      <tr><th>False Positive Rate</th><td id="fpr">-</td></tr>
+      <tr><th>False Negative Rate</th><td id="fnr">-</td></tr>
+      <tr><th>Confusion Matrix</th><td id="confusion">-</td></tr>
+      <tr><th>API errors</th><td id="qualityErrors">-</td></tr>
+    </tbody>
+  </table>
 </section>
 
 <section class="panel strategy">
-  <h2>Monitoring Strategy</h2>
+  <h2>Evaluation Logic</h2>
   <table>
     <tbody>
-      <tr><th>Always On</th><td>Latency, throughput, error rate, model availability.</td></tr>
-      <tr><th>Batch Data Check</th><td>PSI + KS between training reference CSV and current/testing CSV.</td></tr>
-      <tr><th>When Labels Arrive</th><td>PR-AUC, ROC-AUC, F1, Recall, Precision, FPR, FNR and change versus reference quality.</td></tr>
+      <tr><th>Any compatible CSV</th><td>Schema validation + PSI + KS data drift.</td></tr>
+      <tr><th>CSV with label</th><td>Also PR-AUC, ROC-AUC, F1, Recall, Precision, FPR, FNR and confusion matrix.</td></tr>
+      <tr><th>Live API</th><td>Latency, throughput, error rate and model availability.</td></tr>
     </tbody>
   </table>
 </section>
+
 </main>
 <script src="/static/app.js"></script>
 </body>
