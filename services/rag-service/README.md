@@ -105,3 +105,27 @@ The UI includes an **Experiment Run** tab. Normal queries are tracked live throu
 `Chunking / knowledge prep -> Query embedding -> Vector retrieval -> LLM generation -> Answer evaluation -> Save experiment`
 
 Chunking is an ingestion-time step, so during a query it is reported as already prepared. "Evaluate this run" can be disabled to avoid the additional OpenAI judge call.
+
+## Official AttackQA benchmark
+
+Place the official parquet here in the host project:
+
+```text
+shared/data/benchmark/attackqa.parquet
+```
+
+Add this mount to the `rag-service` volumes in `docker-compose.yml`:
+
+```yaml
+- ./shared/data/benchmark:/data/benchmark:ro
+```
+
+Optional environment override:
+
+```yaml
+ATTACKQA_FILE: /data/benchmark/attackqa.parquet
+```
+
+The **Retrieval Evaluation** tab now runs deterministic samples from the official
+`sambanovasystems/attackqa` dataset. Retrieval-only mode measures Hit@1, Hit@K,
+MRR, average retrieval latency and P95 retrieval latency without OpenAI calls.

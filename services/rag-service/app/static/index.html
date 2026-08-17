@@ -91,12 +91,26 @@
   <section id="retrieval" class="panel">
     <div class="grid">
       <div class="card c12">
-        <div class="section-title">Retrieval Benchmark</div>
-        <p class="muted">Runs 5 fixed MITRE ATT&CK questions with expected technique IDs and reports Hit@K and MRR.</p>
-        <div class="row"><div class="field small"><label>Top K</label><select id="evalTopK"><option>1</option><option selected>5</option><option>10</option></select></div><button id="evalBtn" onclick="runRetrievalEval()">Run Retrieval Benchmark</button></div>
+        <div class="section-title">Official AttackQA Benchmark</div>
+        <p class="muted">Runs the official <b>sambanovasystems/attackqa</b> parquet from <code>shared/data/benchmark/attackqa.parquet</code>. Retrieval-only mode does not call OpenAI.</p>
+        <div id="attackqaInfo" class="tiny" style="margin-bottom:12px">Checking benchmark file...</div>
+        <div class="row">
+          <div class="field small"><label>Questions</label><select id="attackqaQuestions"><option>25</option><option selected>50</option><option>100</option><option>250</option><option>500</option></select></div>
+          <div class="field small"><label>Top K</label><select id="evalTopK"><option>1</option><option>3</option><option selected>5</option><option>10</option><option>20</option></select></div>
+          <div class="field" style="max-width:220px"><label>Sample</label><select id="attackqaMode"><option value="all" selected>All usable AttackQA</option><option value="human_question">Human questions only</option><option value="human_qa">Human Q + Human A</option></select></div>
+          <div class="check"><input id="attackqaGeneration" type="checkbox"><label for="attackqaGeneration" style="margin:0">Full RAG generation</label></div>
+          <button id="evalBtn" onclick="runAttackQABenchmark()">Run AttackQA Benchmark</button>
+        </div>
+        <div class="tiny" style="margin-top:10px">Full RAG generation uses OpenAI for each benchmark question and is limited to 50 questions. Retrieval-only is recommended first.</div>
       </div>
-      <div class="card c12"><div class="kpis" id="retrievalKpis"><div class="kpi"><div class="l">Hit@K</div><div class="v">—</div></div><div class="kpi"><div class="l">MRR</div><div class="v">—</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">—</div></div></div></div>
-      <div class="card c12"><div class="section-title">Benchmark Details</div><div style="overflow:auto"><table><thead><tr><th>Question</th><th>Expected</th><th>Hit</th><th>Rank</th><th>Latency</th><th>Returned IDs</th></tr></thead><tbody id="evalRows"><tr><td colspan="6" class="muted">Run the benchmark to populate results.</td></tr></tbody></table></div></div>
+      <div class="card c12"><div class="kpis" id="retrievalKpis">
+        <div class="kpi"><div class="l">Hit@1</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Hit@K</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">MRR</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Avg Retrieval</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">P95 Retrieval</div><div class="v">—</div></div>
+      </div></div>
+      <div class="card c12"><div class="section-title">AttackQA Details</div><div style="overflow:auto"><table><thead><tr><th>Question</th><th>Expected ATT&CK</th><th>Hit@K</th><th>Rank</th><th>RR</th><th>Latency</th><th>Returned IDs</th></tr></thead><tbody id="evalRows"><tr><td colspan="7" class="muted">Run the official benchmark to populate results.</td></tr></tbody></table></div></div>
     </div>
   </section>
 
@@ -196,7 +210,26 @@ function renderExperimentRun(d){
   else{$('runEvaluation').classList.add('muted');$('runEvaluation').textContent=d.auto_evaluate===false?'Evaluation disabled.':'No evaluation yet.';}
 }
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-async function runRetrievalEval(){$('evalBtn').disabled=true;status('Running retrieval benchmark...');try{const r=await fetch('/evaluate/retrieval',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({top_k:Number($('evalTopK').value)})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Benchmark failed');$('retrievalKpis').innerHTML=`<div class="kpi"><div class="l">Hit@${d.top_k}</div><div class="v">${fmt(d.hit_rate_at_k*100,0)}%</div></div><div class="kpi"><div class="l">MRR</div><div class="v">${fmt(d.mrr,3)}</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">${fmt(d.avg_retrieval_ms,1)} ms</div></div>`;$('evalRows').innerHTML=d.results.map(x=>`<tr><td>${esc(x.query)}</td><td><b>${esc(x.expected_id)}</b></td><td class="${x.hit?'good':'bad'}">${x.hit?'PASS':'MISS'}</td><td>${x.rank??'—'}</td><td>${fmt(x.latency_ms,1)} ms</td><td>${esc((x.returned_ids||[]).join(', '))}</td></tr>`).join('');status('Retrieval benchmark completed.');}catch(e){status(e.message,true)}finally{$('evalBtn').disabled=false}}
+async function refreshAttackQAInfo(){
+  try{
+    const r=await fetch('/benchmark/attackqa/info'); const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'AttackQA file unavailable');
+    $('attackqaInfo').innerHTML=`Dataset ready: <b>${esc(d.dataset)}</b> · usable technique-linked rows: <b>${d.usable_rows}</b>${d.human_questions==null?'':` · human questions: <b>${d.human_questions}</b>`}`;
+  }catch(e){$('attackqaInfo').innerHTML=`<span class="bad">${esc(e.message)}</span><br>Docker Compose must mount <code>./shared/data/benchmark:/data/benchmark:ro</code>.`;}
+}
+async function runAttackQABenchmark(){
+  const questions=Number($('attackqaQuestions').value), top_k=Number($('evalTopK').value), sample_mode=$('attackqaMode').value, include_generation=$('attackqaGeneration').checked;
+  if(include_generation&&questions>50){status('Full RAG AttackQA benchmark is limited to 50 questions.',true);return;}
+  if(include_generation&&!confirm(`This will make about ${questions} OpenAI generation calls. Continue?`))return;
+  $('evalBtn').disabled=true; status(`Running official AttackQA benchmark on ${questions} questions...`);
+  try{
+    const r=await fetch('/benchmark/attackqa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({questions,top_k,sample_mode,include_generation})});
+    const d=await r.json(); if(!r.ok)throw new Error(d.detail||'AttackQA benchmark failed');
+    $('retrievalKpis').innerHTML=`<div class="kpi"><div class="l">Hit@1</div><div class="v">${fmt(d.hit_at_1*100,1)}%</div></div><div class="kpi"><div class="l">Hit@${d.top_k}</div><div class="v">${fmt(d.hit_at_k*100,1)}%</div></div><div class="kpi"><div class="l">MRR</div><div class="v">${fmt(d.mrr,3)}</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">${fmt(d.avg_retrieval_ms,1)} ms</div></div><div class="kpi"><div class="l">P95 Retrieval</div><div class="v">${fmt(d.p95_retrieval_ms,1)} ms</div></div>`;
+    $('evalRows').innerHTML=(d.results||[]).map(x=>`<tr><td><b>${esc(x.question)}</b><div class="tiny">${esc(x.source||'')}</div></td><td><b>${esc(x.expected_id)}</b>${x.subject_name?`<div class="tiny">${esc(x.subject_name)}</div>`:''}</td><td class="${x.hit_at_k?'good':'bad'}">${x.hit_at_k?'PASS':'MISS'}</td><td>${x.rank??'—'}</td><td>${fmt(x.reciprocal_rank,3)}</td><td>${fmt(x.retrieval_ms,1)} ms</td><td>${esc((x.returned_ids||[]).join(', '))}</td></tr>`).join('');
+    status(`AttackQA completed: ${d.benchmark_size} questions, Hit@${d.top_k} ${fmt(d.hit_at_k*100,1)}%, MRR ${fmt(d.mrr,3)}.`);
+  }catch(e){status(e.message,true)}finally{$('evalBtn').disabled=false}
+}
 async function refreshMetrics(){try{const r=await fetch('/metrics');const d=await r.json();const l=d.latency_ms||{},t=d.tokens||{},res=d.resources||{};$('perfKpis').innerHTML=`<div class="kpi"><div class="l">Queries</div><div class="v">${d.queries_recorded??0}</div></div><div class="kpi"><div class="l">P50 Total</div><div class="v">${fmt(l.p50_total)} ms</div></div><div class="kpi"><div class="l">P95 Total</div><div class="v">${fmt(l.p95_total)} ms</div></div><div class="kpi"><div class="l">P99 Total</div><div class="v">${fmt(l.p99_total)} ms</div></div><div class="kpi"><div class="l">Tokens</div><div class="v">${t.total??0}</div></div>`;$('latencyTable').innerHTML=`<tr><td>P50 retrieval</td><td>${fmt(l.p50_retrieval)} ms</td></tr><tr><td>P95 retrieval</td><td>${fmt(l.p95_retrieval)} ms</td></tr><tr><td>P50 generation</td><td>${fmt(l.p50_generation)} ms</td></tr><tr><td>P95 generation</td><td>${fmt(l.p95_generation)} ms</td></tr><tr><td>P95 end-to-end</td><td>${fmt(l.p95_total)} ms</td></tr>`;$('resourceTable').innerHTML=`<tr><td>Input tokens</td><td>${t.input??0}</td></tr><tr><td>Output tokens</td><td>${t.output??0}</td></tr><tr><td>Process CPU</td><td>${res.cpu_percent==null?'—':fmt(res.cpu_percent)+'%'}</td></tr><tr><td>Process memory</td><td>${res.memory_mb==null?'—':fmt(res.memory_mb)+' MB'}</td></tr><tr><td>System memory</td><td>${res.system_memory_percent==null?'—':fmt(res.system_memory_percent)+'%'}</td></tr>`;}catch(e){status('Metrics error: '+e.message,true)}}
 
 async function refreshExperiments(){
@@ -231,6 +264,7 @@ function pct(vals,p){if(!vals.length)return 0;const a=[...vals].sort((x,y)=>x-y)
 async function runLoadTest(){const total=Math.max(1,Number($('loadRequests').value)),conc=Math.max(1,Number($('concurrency').value)),useLlm=$('loadMode').value==='true';if(useLlm&&!confirm('Full RAG load test will call OpenAI for every request and consume API tokens. Continue?'))return;$('loadBtn').disabled=true;let next=0,done=0,errors=0,times=[];$('loadBar').style.width='0%';const started=performance.now();const worker=async()=>{while(true){const i=next++;if(i>=total)return;const t0=performance.now();try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'What ATT&CK technique covers credential dumping?',top_k:5,use_llm:useLlm,record_experiment:false})});if(!r.ok)errors++;await r.json();}catch(e){errors++}times.push(performance.now()-t0);done++;$('loadBar').style.width=`${done/total*100}%`;$('loadProgress').textContent=`${done}/${total} completed`;}};status(`Running ${total} requests with concurrency ${conc}...`);await Promise.all(Array.from({length:Math.min(conc,total)},worker));const sec=(performance.now()-started)/1000,rps=total/sec,rph=rps*3600,p50=pct(times,.5),p95=pct(times,.95),p99=pct(times,.99),er=errors/total;$('scaleKpis').innerHTML=`<div class="kpi"><div class="l">Throughput</div><div class="v">${fmt(rps,1)} rps</div></div><div class="kpi"><div class="l">Requests/hour</div><div class="v">${(rph/1e6).toFixed(2)}M</div></div><div class="kpi"><div class="l">P95</div><div class="v">${fmt(p95,0)} ms</div></div><div class="kpi"><div class="l">P99</div><div class="v">${fmt(p99,0)} ms</div></div><div class="kpi"><div class="l">Error rate</div><div class="v">${fmt(er*100,2)}%</div></div>`;const passR=rps>=278,passL=useLlm?null:p95<500,passE=er<.01;$('scaleBenchmark').innerHTML=`<tr><td>Throughput</td><td>${fmt(rps,1)} req/s</td><td>≥ 278 req/s (≈1M/hour)</td><td class="${passR?'good':'bad'}">${passR?'PASS':'FAIL'}</td></tr><tr><td>P95 latency</td><td>${fmt(p95,0)} ms</td><td>${useLlm?'Informational for Full RAG':'< 500 ms retrieval-only'}</td><td class="${passL===null?'':' '+(passL?'good':'bad')}">${passL===null?'INFO':passL?'PASS':'FAIL'}</td></tr><tr><td>Error rate</td><td>${fmt(er*100,2)}%</td><td>< 1%</td><td class="${passE?'good':'bad'}">${passE?'PASS':'FAIL'}</td></tr>`;$('loadProgress').textContent=`Completed ${total} requests in ${fmt(sec,2)} s.`;status('Load test completed.');$('loadBtn').disabled=false;refreshMetrics()}
 refreshMetrics();
 refreshExperimentRun();
+refreshAttackQAInfo();
 </script>
 </body>
 </html>

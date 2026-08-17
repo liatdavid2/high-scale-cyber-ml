@@ -12,6 +12,7 @@ from app.metrics import metrics_snapshot, record_query
 from app.experiments import save_experiment, list_experiments, get_unevaluated, save_evaluation, summary as experiments_summary
 from app.evaluator import evaluate_generation
 from app.experiment_run import experiment_run
+from app.attackqa import attackqa_info, run_attackqa_benchmark
 
 app = FastAPI(title="High Scale Cyber RAG", version="1.1.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -27,6 +28,13 @@ class QueryRequest(BaseModel):
 
 class RetrievalEvalRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
+
+
+class AttackQABenchmarkRequest(BaseModel):
+    questions: int = Field(default=50, ge=5, le=500)
+    top_k: int = Field(default=5, ge=1, le=20)
+    sample_mode: str = Field(default="all", pattern="^(all|human_question|human_qa)$")
+    include_generation: bool = False
 
 
 RETRIEVAL_BENCHMARK = [
@@ -189,6 +197,32 @@ def query(req: QueryRequest):
 @app.get("/experiment-run")
 def experiment_run_status():
     return experiment_run.snapshot()
+
+
+@app.get("/benchmark/attackqa/info")
+def benchmark_attackqa_info():
+    try:
+        return attackqa_info()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/benchmark/attackqa")
+def benchmark_attackqa(req: AttackQABenchmarkRequest):
+    if req.include_generation and req.questions > 50:
+        raise HTTPException(
+            status_code=400,
+            detail="Full RAG benchmark is limited to 50 questions because it calls OpenAI once per question.",
+        )
+    try:
+        return run_attackqa_benchmark(
+            count=req.questions,
+            top_k=req.top_k,
+            sample_mode=req.sample_mode,
+            include_generation=req.include_generation,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/evaluate/retrieval")

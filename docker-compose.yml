@@ -24,6 +24,8 @@ services:
       - ./shared/data/knowledge:/data/knowledge:ro
       - huggingface_cache:/root/.cache/huggingface
       - ./shared/rag_evaluations:/app/data
+      - ./shared/data/knowledge:/data/knowledge:ro
+      - ./shared/data/benchmark:/data/benchmark:ro
     depends_on:
       - qdrant
 
