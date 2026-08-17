@@ -22,6 +22,7 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
     volumes:
       - ./shared/data/knowledge:/data/knowledge:ro
+      - huggingface_cache:/root/.cache/huggingface
     depends_on:
       - qdrant
 
@@ -155,3 +156,4 @@ volumes:
   kafka-data:
   mlflow-data:
   qdrant_data:
+  huggingface_cache:
