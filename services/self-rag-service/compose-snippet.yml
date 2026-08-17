@@ -1,0 +1,22 @@
+# Add this service to the existing high-scale-cyber-ml docker-compose.yml.
+# It reuses the existing qdrant service but writes to a separate collection.
+
+services:
+  self-rag-service:
+    build:
+      context: ./services/self-rag-service
+    container_name: high-scale-cyber-self-rag
+    ports:
+      - "2400:2400"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: unsw_similar_cases
+      UNSW_DATASET_PATH: /shared/data/raw/UNSW_NB15_training-set.csv
+      INGEST_BATCH_SIZE: 1000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-mini}
+    volumes:
+      - ./shared/data/raw:/shared/data/raw:ro
+      - ./shared/self_rag_history:/app/data
+    depends_on:
+      - qdrant

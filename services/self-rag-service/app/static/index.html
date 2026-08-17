@@ -1,0 +1,207 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>UNSW Similar Cases Self-RAG</title>
+<style>
+body{font-family:Arial,sans-serif;margin:0;background:#f4f4f4;color:#161616}
+header{background:#161616;color:#fff;padding:14px 24px;font-weight:bold}
+main{max-width:1320px;margin:24px auto;background:#fff;padding:24px}
+h1{margin-top:0}
+.tabs{display:flex;border-bottom:1px solid #999;margin-bottom:18px}
+.tab{padding:12px 18px;cursor:pointer}
+.tab.active{border-bottom:3px solid #0f62fe;color:#0f62fe;font-weight:bold}
+.panel{display:none}.panel.active{display:block}
+.box{border:1px solid #ddd;padding:18px;margin:14px 0}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.metric{border-left:3px solid #0f62fe;background:#f4f4f4;padding:14px}
+.metric .value{font-size:24px;font-weight:bold;margin-top:6px}
+button{background:#0f62fe;color:white;border:0;padding:10px 16px;font-weight:bold;cursor:pointer}
+button.secondary{background:white;color:#111;border:1px solid #777}
+input,select{padding:9px;border:1px solid #888;margin:3px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{border-bottom:1px solid #ddd;padding:9px;text-align:left;vertical-align:top}
+th{background:#e8e8e8}
+.status{background:#e8f1ff;border-left:3px solid #0f62fe;padding:10px;margin-bottom:14px}
+.reason{font-size:12px;color:#444}
+.pass{color:#198038;font-weight:bold}
+.warn{color:#b28600;font-weight:bold}
+pre{white-space:pre-wrap;background:#f4f4f4;padding:12px}
+.small{font-size:12px;color:#555}
+</style>
+</head>
+<body>
+<header>High Scale Cyber ML — UNSW Similar Cases Self-RAG</header>
+<main>
+<h1>Similar Case Retrieval & Evaluation</h1>
+<p>Find traffic cases similar to a UNSW-NB15 record, explain why they are similar, and evaluate retrieval quality.</p>
+
+<div class="status" id="status">Loading service status...</div>
+
+<div class="tabs">
+  <div class="tab active" data-tab="query">Similar Cases</div>
+  <div class="tab" data-tab="benchmark">Retrieval Evaluation</div>
+  <div class="tab" data-tab="history">Experiment History</div>
+</div>
+
+<section id="query" class="panel active">
+  <div class="box">
+    <h3>Query by dataset row</h3>
+    <label>Row index</label>
+    <input id="rowIndex" type="number" value="100" min="0">
+    <label>Top K</label>
+    <select id="topK">
+      <option>3</option><option selected>5</option><option>10</option>
+    </select>
+    <label><input id="useLLM" type="checkbox" checked> OpenAI self-check</label>
+    <button onclick="runRowQuery()">Find Similar Cases</button>
+    <button class="secondary" onclick="ingest()">Ingest / Rebuild Index</button>
+  </div>
+
+  <div class="grid" id="queryMetrics" style="display:none">
+    <div class="metric"><div>Retrieval</div><div class="value" id="retrievalMs">-</div></div>
+    <div class="metric"><div>Total</div><div class="value" id="totalMs">-</div></div>
+    <div class="metric"><div>Top-1 Similarity</div><div class="value" id="top1Sim">-</div></div>
+    <div class="metric"><div>Retrieved Cases</div><div class="value" id="matchCount">-</div></div>
+  </div>
+
+  <div class="box">
+    <h3>Retrieved Similar Cases</h3>
+    <div id="results">No query yet.</div>
+  </div>
+
+  <div class="box">
+    <h3>Self-RAG Check</h3>
+    <pre id="selfCheck">No evaluation yet.</pre>
+  </div>
+</section>
+
+<section id="benchmark" class="panel">
+  <div class="box">
+    <h3>Similar-Case Retrieval Benchmark</h3>
+    <p class="small">
+      Retrieval never uses label or attack_cat. They are used only after retrieval as ground truth:
+      do nearest traffic cases belong to the same class / attack category?
+    </p>
+    <label>Queries</label>
+    <select id="benchN"><option>50</option><option selected>100</option><option>250</option><option>500</option></select>
+    <label>Top K</label>
+    <select id="benchK"><option>3</option><option selected>5</option><option>10</option></select>
+    <button onclick="runBenchmark()">Run Benchmark</button>
+  </div>
+
+  <div class="grid" id="benchMetrics" style="display:none">
+    <div class="metric"><div>Top-1 Label Accuracy</div><div class="value" id="bTop1">-</div></div>
+    <div class="metric"><div>Label Agreement@K</div><div class="value" id="bLabelK">-</div></div>
+    <div class="metric"><div>Attack Category Agreement@K</div><div class="value" id="bAttackK">-</div></div>
+    <div class="metric"><div>Mean Top-1 Similarity</div><div class="value" id="bSim">-</div></div>
+    <div class="metric"><div>Avg Retrieval</div><div class="value" id="bAvg">-</div></div>
+    <div class="metric"><div>P95 Retrieval</div><div class="value" id="bP95">-</div></div>
+  </div>
+
+  <div class="box">
+    <h3>Benchmark Details</h3>
+    <div id="benchDetails">No benchmark yet.</div>
+  </div>
+</section>
+
+<section id="history" class="panel">
+  <div class="box">
+    <h3>Experiment Records</h3>
+    <button onclick="loadHistory()">Refresh</button>
+    <div id="historyData" style="margin-top:12px">No history loaded.</div>
+  </div>
+</section>
+
+</main>
+
+<script>
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick=()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    document.getElementById(t.dataset.tab).classList.add('active');
+    if(t.dataset.tab==='history') loadHistory();
+  };
+});
+
+async function refreshStatus(){
+  try{
+    const r=await fetch('/api/status'); const d=await r.json();
+    document.getElementById('status').textContent =
+      `Dataset: ${d.dataset_exists?'FOUND':'MISSING'} | Collection: ${d.collection_exists?'READY':'NOT INDEXED'} | Indexed cases: ${d.indexed_points}`;
+  }catch(e){document.getElementById('status').textContent='Failed to fetch status';}
+}
+refreshStatus();
+
+async function ingest(){
+  document.getElementById('status').textContent='Indexing UNSW-NB15 cases...';
+  const r=await fetch('/api/ingest',{method:'POST'});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('status').textContent='ERROR: '+(d.detail||JSON.stringify(d)); return;}
+  document.getElementById('status').textContent=`Indexed ${d.indexed} cases in ${(d.elapsed_ms/1000).toFixed(1)} s. label/attack_cat were NOT used for retrieval.`;
+}
+
+async function runRowQuery(){
+  document.getElementById('results').textContent='Searching...';
+  const payload={
+    row_index:Number(document.getElementById('rowIndex').value),
+    top_k:Number(document.getElementById('topK').value),
+    use_llm:document.getElementById('useLLM').checked
+  };
+  const r=await fetch('/api/query/row',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('results').textContent='ERROR: '+(d.detail||JSON.stringify(d));return;}
+
+  document.getElementById('queryMetrics').style.display='grid';
+  document.getElementById('retrievalMs').textContent=d.retrieval_ms.toFixed(1)+' ms';
+  document.getElementById('totalMs').textContent=d.total_ms.toFixed(1)+' ms';
+  document.getElementById('top1Sim').textContent=d.matches.length?d.matches[0].similarity.toFixed(3):'-';
+  document.getElementById('matchCount').textContent=d.matches.length;
+
+  let html=`<p><b>Query row:</b> ${d.query_row_index} &nbsp; <b>True label:</b> ${d.query_label} &nbsp; <b>Attack category:</b> ${d.query_attack_cat}</p>`;
+  html+='<table><tr><th>Rank</th><th>Row</th><th>Similarity</th><th>Label</th><th>Attack Category</th><th>Why Similar?</th><th>Main Differences</th></tr>';
+  d.explanation.forEach(x=>{
+    html+=`<tr><td>${x.rank}</td><td>${x.row_index}</td><td><b>${x.similarity.toFixed(3)}</b></td><td>${x.label}</td><td>${x.attack_cat}</td><td>${x.why_similar.join('<br>')}</td><td>${x.differences.join('<br>')||'Minor differences'}</td></tr>`;
+  });
+  html+='</table>';
+  document.getElementById('results').innerHTML=html;
+  document.getElementById('selfCheck').textContent=JSON.stringify(d.self_check,null,2);
+}
+
+async function runBenchmark(){
+  document.getElementById('benchDetails').textContent='Running benchmark...';
+  const payload={questions:Number(document.getElementById('benchN').value),top_k:Number(document.getElementById('benchK').value)};
+  const r=await fetch('/api/benchmark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const d=await r.json();
+  if(!r.ok){document.getElementById('benchDetails').textContent='ERROR: '+(d.detail||JSON.stringify(d));return;}
+
+  document.getElementById('benchMetrics').style.display='grid';
+  document.getElementById('bTop1').textContent=(d.top1_label_accuracy*100).toFixed(1)+'%';
+  document.getElementById('bLabelK').textContent=(d.mean_label_agreement_at_k*100).toFixed(1)+'%';
+  document.getElementById('bAttackK').textContent=(d.mean_attack_cat_agreement_at_k*100).toFixed(1)+'%';
+  document.getElementById('bSim').textContent=d.mean_top1_similarity.toFixed(3);
+  document.getElementById('bAvg').textContent=d.avg_retrieval_ms.toFixed(1)+' ms';
+  document.getElementById('bP95').textContent=d.p95_retrieval_ms.toFixed(1)+' ms';
+
+  let html='<table><tr><th>Row</th><th>Label</th><th>Attack Cat</th><th>Top1 Sim</th><th>Label Agreement@K</th><th>Attack Agreement@K</th><th>Retrieval</th></tr>';
+  d.details.slice(0,100).forEach(x=>{
+    html+=`<tr><td>${x.row_index}</td><td>${x.label}</td><td>${x.attack_cat}</td><td>${x.top1_similarity.toFixed(3)}</td><td>${(x.label_agreement_at_k*100).toFixed(0)}%</td><td>${(x.attack_cat_agreement_at_k*100).toFixed(0)}%</td><td>${x.retrieval_ms.toFixed(1)} ms</td></tr>`;
+  });
+  html+='</table>';
+  document.getElementById('benchDetails').innerHTML=html;
+}
+
+async function loadHistory(){
+  const r=await fetch('/api/history'); const d=await r.json();
+  let html='<table><tr><th>ID</th><th>Time</th><th>Type</th><th>Query</th><th>Top K</th><th>Retrieval</th><th>Total</th></tr>';
+  d.forEach(x=>{
+    html+=`<tr><td>${x.id}</td><td>${x.created_at}</td><td>${x.query_type}</td><td>${JSON.stringify(x.query_payload)}</td><td>${x.top_k}</td><td>${Number(x.retrieval_ms).toFixed(1)} ms</td><td>${Number(x.total_ms).toFixed(1)} ms</td></tr>`;
+  });
+  html+='</table>';
+  document.getElementById('historyData').innerHTML=html;
+}
+</script>
+</body>
+</html>
