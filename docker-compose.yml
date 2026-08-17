@@ -23,6 +23,7 @@ services:
     volumes:
       - ./shared/data/knowledge:/data/knowledge:ro
       - huggingface_cache:/root/.cache/huggingface
+      - ./shared/rag_evaluations:/app/data
     depends_on:
       - qdrant
 

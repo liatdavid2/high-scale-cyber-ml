@@ -36,6 +36,7 @@
     <div class="tab active" data-tab="query">Query</div>
     <div class="tab" data-tab="retrieval">Retrieval Evaluation</div>
     <div class="tab" data-tab="performance">Performance</div>
+    <div class="tab" data-tab="history">Evaluation History</div>
     <div class="tab" data-tab="scale">Scale Test</div>
   </div>
 
@@ -77,6 +78,41 @@
     </div>
   </section>
 
+
+  <section id="history" class="panel">
+    <div class="grid">
+      <div class="card c12">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div>
+            <div class="section-title">Experiment Records</div>
+            <div class="tiny">Every normal RAG query is stored in SQLite with retrieval sources, answer, tokens and latency. Load-test requests are excluded.</div>
+          </div>
+          <div class="actions">
+            <button class="secondary" onclick="refreshExperiments()">Refresh</button>
+            <button id="evalAllBtn" onclick="evaluateAllQueries()">Evaluate All Unevaluated</button>
+          </div>
+        </div>
+        <div class="tiny" style="margin-top:10px">Generation evaluation uses the configured OpenAI model as a judge for groundedness and answer relevance, so it consumes additional API tokens.</div>
+      </div>
+      <div class="card c12"><div class="kpis" id="historyKpis">
+        <div class="kpi"><div class="l">Queries</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Evaluated</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Groundedness</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Relevance</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Avg total latency</div><div class="v">—</div></div>
+      </div></div>
+      <div class="card c12">
+        <div class="section-title">All Query Evaluations</div>
+        <div style="overflow:auto">
+          <table>
+            <thead><tr><th>ID</th><th>Query</th><th>Top K</th><th>Top-1 sim.</th><th>Mean sim.</th><th>Groundedness</th><th>Relevance</th><th>Retrieval</th><th>Generation</th><th>Total</th><th>Tokens</th><th>Sources</th><th>Time</th></tr></thead>
+            <tbody id="historyRows"><tr><td colspan="13" class="muted">No experiment records yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <section id="scale" class="panel">
     <div class="grid">
       <div class="card c12">
@@ -98,15 +134,44 @@
 <script>
 const $=id=>document.getElementById(id); const fmt=(v,d=1)=>v==null?'—':Number(v).toFixed(d);
 function status(msg,error=false){$('globalStatus').textContent=msg;$('globalStatus').style.borderLeftColor=error?'#da1e28':'#0f62fe';}
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(t.dataset.tab).classList.add('active');if(t.dataset.tab==='performance')refreshMetrics();});
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(t.dataset.tab).classList.add('active');if(t.dataset.tab==='performance')refreshMetrics();if(t.dataset.tab==='history')refreshExperiments();});
 async function ingest(){status('Ingesting MITRE/CAPEC into Qdrant...');try{const r=await fetch('/ingest',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ingest failed');status(`Ingestion completed: ${d.indexed||0} documents indexed into ${d.collection}.`);}catch(e){status(e.message,true)}}
 async function ask(){const q=$('question').value.trim();if(!q)return status('Enter a question first.',true);$('askBtn').disabled=true;status('Running RAG query...');try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,top_k:Number($('topK').value),use_llm:$('useLlm').checked})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Query failed');renderQuery(d);status('Query completed.');}catch(e){status(e.message,true)}finally{$('askBtn').disabled=false}}
 function renderQuery(d){const a=d.answer; $('answer').classList.remove('muted');$('answer').textContent=a?.text||a?.message||($('useLlm').checked?'No generated answer.':'Retrieval-only mode.');const p=d.performance||{};$('queryKpis').innerHTML=`<table><tbody><tr><td>Retrieval</td><td><b>${fmt(p.retrieval_ms,2)} ms</b></td></tr><tr><td>Generation</td><td><b>${fmt(p.generation_ms,2)} ms</b></td></tr><tr><td>End-to-end</td><td><b>${fmt(p.total_ms,2)} ms</b></td></tr><tr><td>Input tokens</td><td><b>${p.input_tokens??0}</b></td></tr><tr><td>Output tokens</td><td><b>${p.output_tokens??0}</b></td></tr></tbody></table>`;$('sources').innerHTML=(d.matches||[]).map((m,i)=>`<div class="source"><b>#${i+1} ${esc(m.id||'')} — ${esc(m.name||'')}</b><div class="tiny">${esc(m.source||'')} · similarity ${fmt(m.score,4)}</div><div>${esc((m.text||'').slice(0,500))}${(m.text||'').length>500?'…':''}</div></div>`).join('')||'<span class="muted">No matches.</span>';}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function runRetrievalEval(){$('evalBtn').disabled=true;status('Running retrieval benchmark...');try{const r=await fetch('/evaluate/retrieval',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({top_k:Number($('evalTopK').value)})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Benchmark failed');$('retrievalKpis').innerHTML=`<div class="kpi"><div class="l">Hit@${d.top_k}</div><div class="v">${fmt(d.hit_rate_at_k*100,0)}%</div></div><div class="kpi"><div class="l">MRR</div><div class="v">${fmt(d.mrr,3)}</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">${fmt(d.avg_retrieval_ms,1)} ms</div></div>`;$('evalRows').innerHTML=d.results.map(x=>`<tr><td>${esc(x.query)}</td><td><b>${esc(x.expected_id)}</b></td><td class="${x.hit?'good':'bad'}">${x.hit?'PASS':'MISS'}</td><td>${x.rank??'—'}</td><td>${fmt(x.latency_ms,1)} ms</td><td>${esc((x.returned_ids||[]).join(', '))}</td></tr>`).join('');status('Retrieval benchmark completed.');}catch(e){status(e.message,true)}finally{$('evalBtn').disabled=false}}
 async function refreshMetrics(){try{const r=await fetch('/metrics');const d=await r.json();const l=d.latency_ms||{},t=d.tokens||{},res=d.resources||{};$('perfKpis').innerHTML=`<div class="kpi"><div class="l">Queries</div><div class="v">${d.queries_recorded??0}</div></div><div class="kpi"><div class="l">P50 Total</div><div class="v">${fmt(l.p50_total)} ms</div></div><div class="kpi"><div class="l">P95 Total</div><div class="v">${fmt(l.p95_total)} ms</div></div><div class="kpi"><div class="l">P99 Total</div><div class="v">${fmt(l.p99_total)} ms</div></div><div class="kpi"><div class="l">Tokens</div><div class="v">${t.total??0}</div></div>`;$('latencyTable').innerHTML=`<tr><td>P50 retrieval</td><td>${fmt(l.p50_retrieval)} ms</td></tr><tr><td>P95 retrieval</td><td>${fmt(l.p95_retrieval)} ms</td></tr><tr><td>P50 generation</td><td>${fmt(l.p50_generation)} ms</td></tr><tr><td>P95 generation</td><td>${fmt(l.p95_generation)} ms</td></tr><tr><td>P95 end-to-end</td><td>${fmt(l.p95_total)} ms</td></tr>`;$('resourceTable').innerHTML=`<tr><td>Input tokens</td><td>${t.input??0}</td></tr><tr><td>Output tokens</td><td>${t.output??0}</td></tr><tr><td>Process CPU</td><td>${res.cpu_percent==null?'—':fmt(res.cpu_percent)+'%'}</td></tr><tr><td>Process memory</td><td>${res.memory_mb==null?'—':fmt(res.memory_mb)+' MB'}</td></tr><tr><td>System memory</td><td>${res.system_memory_percent==null?'—':fmt(res.system_memory_percent)+'%'}</td></tr>`;}catch(e){status('Metrics error: '+e.message,true)}}
+
+async function refreshExperiments(){
+  try{
+    const [rr,sr]=await Promise.all([fetch('/experiments?limit=500'),fetch('/experiments/summary')]);
+    const d=await rr.json(), sum=await sr.json();
+    if(!rr.ok)throw new Error(d.detail||'Could not load experiments');
+    const total=Number(sum.total||0), evaluated=Number(sum.evaluated||0);
+    $('historyKpis').innerHTML=`<div class="kpi"><div class="l">Queries</div><div class="v">${total}</div></div><div class="kpi"><div class="l">Evaluated</div><div class="v">${evaluated}/${total}</div></div><div class="kpi"><div class="l">Groundedness</div><div class="v">${sum.avg_groundedness==null?'—':fmt(sum.avg_groundedness,3)}</div></div><div class="kpi"><div class="l">Relevance</div><div class="v">${sum.avg_relevance==null?'—':fmt(sum.avg_relevance,3)}</div></div><div class="kpi"><div class="l">Avg total latency</div><div class="v">${sum.avg_total_ms==null?'—':fmt(sum.avg_total_ms,0)+' ms'}</div></div>`;
+    const rows=d.records||[];
+    $('historyRows').innerHTML=rows.length?rows.map(x=>{
+      const tokens=(x.input_tokens||0)+(x.output_tokens||0);
+      const sourceIds=(x.matches||[]).map(m=>m.id).filter(Boolean).slice(0,5).join(', ');
+      const when=x.created_at?new Date(x.created_at).toLocaleString():'—';
+      return `<tr><td>${x.id}</td><td><b>${esc(x.query)}</b>${x.eval_notes?`<div class="tiny">${esc(x.eval_notes)}</div>`:''}</td><td>${x.top_k}</td><td>${x.top1_similarity==null?'—':fmt(x.top1_similarity,3)}</td><td>${x.mean_similarity==null?'—':fmt(x.mean_similarity,3)}</td><td class="${x.eval_groundedness==null?'':x.eval_groundedness>=.8?'good':'bad'}">${x.eval_groundedness==null?'Not evaluated':fmt(x.eval_groundedness,3)}</td><td class="${x.eval_relevance==null?'':x.eval_relevance>=.8?'good':'bad'}">${x.eval_relevance==null?'Not evaluated':fmt(x.eval_relevance,3)}</td><td>${fmt(x.retrieval_ms,1)} ms</td><td>${fmt(x.generation_ms,1)} ms</td><td>${fmt(x.total_ms,1)} ms</td><td>${tokens}</td><td><div class="tiny">${esc(sourceIds||'—')}</div></td><td>${esc(when)}</td></tr>`;
+    }).join(''):'<tr><td colspan="13" class="muted">No experiment records yet. Run a normal query first.</td></tr>';
+  }catch(e){status('Experiment history error: '+e.message,true)}
+}
+async function evaluateAllQueries(){
+  if(!confirm('Evaluate every stored query that has not been evaluated yet? This makes additional OpenAI calls and consumes API tokens.'))return;
+  $('evalAllBtn').disabled=true;status('Evaluating stored RAG queries...');
+  try{
+    const r=await fetch('/experiments/evaluate-all',{method:'POST'});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Evaluation failed');
+    status(`Evaluation completed: ${d.evaluated} evaluated, ${d.failed} failed.`);
+    await refreshExperiments();
+  }catch(e){status(e.message,true)}finally{$('evalAllBtn').disabled=false}
+}
+
 function pct(vals,p){if(!vals.length)return 0;const a=[...vals].sort((x,y)=>x-y),idx=(a.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);return a[lo]+(a[hi]-a[lo])*(idx-lo)}
-async function runLoadTest(){const total=Math.max(1,Number($('loadRequests').value)),conc=Math.max(1,Number($('concurrency').value)),useLlm=$('loadMode').value==='true';if(useLlm&&!confirm('Full RAG load test will call OpenAI for every request and consume API tokens. Continue?'))return;$('loadBtn').disabled=true;let next=0,done=0,errors=0,times=[];$('loadBar').style.width='0%';const started=performance.now();const worker=async()=>{while(true){const i=next++;if(i>=total)return;const t0=performance.now();try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'What ATT&CK technique covers credential dumping?',top_k:5,use_llm:useLlm})});if(!r.ok)errors++;await r.json();}catch(e){errors++}times.push(performance.now()-t0);done++;$('loadBar').style.width=`${done/total*100}%`;$('loadProgress').textContent=`${done}/${total} completed`;}};status(`Running ${total} requests with concurrency ${conc}...`);await Promise.all(Array.from({length:Math.min(conc,total)},worker));const sec=(performance.now()-started)/1000,rps=total/sec,rph=rps*3600,p50=pct(times,.5),p95=pct(times,.95),p99=pct(times,.99),er=errors/total;$('scaleKpis').innerHTML=`<div class="kpi"><div class="l">Throughput</div><div class="v">${fmt(rps,1)} rps</div></div><div class="kpi"><div class="l">Requests/hour</div><div class="v">${(rph/1e6).toFixed(2)}M</div></div><div class="kpi"><div class="l">P95</div><div class="v">${fmt(p95,0)} ms</div></div><div class="kpi"><div class="l">P99</div><div class="v">${fmt(p99,0)} ms</div></div><div class="kpi"><div class="l">Error rate</div><div class="v">${fmt(er*100,2)}%</div></div>`;const passR=rps>=278,passL=useLlm?null:p95<500,passE=er<.01;$('scaleBenchmark').innerHTML=`<tr><td>Throughput</td><td>${fmt(rps,1)} req/s</td><td>≥ 278 req/s (≈1M/hour)</td><td class="${passR?'good':'bad'}">${passR?'PASS':'FAIL'}</td></tr><tr><td>P95 latency</td><td>${fmt(p95,0)} ms</td><td>${useLlm?'Informational for Full RAG':'< 500 ms retrieval-only'}</td><td class="${passL===null?'':' '+(passL?'good':'bad')}">${passL===null?'INFO':passL?'PASS':'FAIL'}</td></tr><tr><td>Error rate</td><td>${fmt(er*100,2)}%</td><td>< 1%</td><td class="${passE?'good':'bad'}">${passE?'PASS':'FAIL'}</td></tr>`;$('loadProgress').textContent=`Completed ${total} requests in ${fmt(sec,2)} s.`;status('Load test completed.');$('loadBtn').disabled=false;refreshMetrics()}
+async function runLoadTest(){const total=Math.max(1,Number($('loadRequests').value)),conc=Math.max(1,Number($('concurrency').value)),useLlm=$('loadMode').value==='true';if(useLlm&&!confirm('Full RAG load test will call OpenAI for every request and consume API tokens. Continue?'))return;$('loadBtn').disabled=true;let next=0,done=0,errors=0,times=[];$('loadBar').style.width='0%';const started=performance.now();const worker=async()=>{while(true){const i=next++;if(i>=total)return;const t0=performance.now();try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'What ATT&CK technique covers credential dumping?',top_k:5,use_llm:useLlm,record_experiment:false})});if(!r.ok)errors++;await r.json();}catch(e){errors++}times.push(performance.now()-t0);done++;$('loadBar').style.width=`${done/total*100}%`;$('loadProgress').textContent=`${done}/${total} completed`;}};status(`Running ${total} requests with concurrency ${conc}...`);await Promise.all(Array.from({length:Math.min(conc,total)},worker));const sec=(performance.now()-started)/1000,rps=total/sec,rph=rps*3600,p50=pct(times,.5),p95=pct(times,.95),p99=pct(times,.99),er=errors/total;$('scaleKpis').innerHTML=`<div class="kpi"><div class="l">Throughput</div><div class="v">${fmt(rps,1)} rps</div></div><div class="kpi"><div class="l">Requests/hour</div><div class="v">${(rph/1e6).toFixed(2)}M</div></div><div class="kpi"><div class="l">P95</div><div class="v">${fmt(p95,0)} ms</div></div><div class="kpi"><div class="l">P99</div><div class="v">${fmt(p99,0)} ms</div></div><div class="kpi"><div class="l">Error rate</div><div class="v">${fmt(er*100,2)}%</div></div>`;const passR=rps>=278,passL=useLlm?null:p95<500,passE=er<.01;$('scaleBenchmark').innerHTML=`<tr><td>Throughput</td><td>${fmt(rps,1)} req/s</td><td>≥ 278 req/s (≈1M/hour)</td><td class="${passR?'good':'bad'}">${passR?'PASS':'FAIL'}</td></tr><tr><td>P95 latency</td><td>${fmt(p95,0)} ms</td><td>${useLlm?'Informational for Full RAG':'< 500 ms retrieval-only'}</td><td class="${passL===null?'':' '+(passL?'good':'bad')}">${passL===null?'INFO':passL?'PASS':'FAIL'}</td></tr><tr><td>Error rate</td><td>${fmt(er*100,2)}%</td><td>< 1%</td><td class="${passE?'good':'bad'}">${passE?'PASS':'FAIL'}</td></tr>`;$('loadProgress').textContent=`Completed ${total} requests in ${fmt(sec,2)} s.`;status('Load test completed.');$('loadBtn').disabled=false;refreshMetrics()}
 refreshMetrics();
 </script>
 </body>

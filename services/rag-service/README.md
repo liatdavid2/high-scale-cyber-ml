@@ -78,3 +78,22 @@ INGEST_BATCH_SIZE=64
 ```
 
 Use a smaller value if Docker is still memory constrained.
+
+
+## Experiment history
+
+Normal `/query` requests are persisted as experiment records in SQLite at:
+
+```text
+/app/data/rag_evaluations.db
+```
+
+For an explicit host folder in Docker Compose, mount:
+
+```yaml
+volumes:
+  - ./shared/rag_evaluations:/app/data
+```
+
+Load-test requests from the UI use `record_experiment=false`, so they do not flood the experiment history.
+The **Evaluation History** tab can evaluate all stored, unevaluated generated answers for groundedness and relevance. This uses additional OpenAI calls.

@@ -9,3 +9,5 @@ shared/data/processed/*
 !shared/data/processed/.gitkeep
 .env
 *.zip
+/shared/qdrant_storage
+*.db

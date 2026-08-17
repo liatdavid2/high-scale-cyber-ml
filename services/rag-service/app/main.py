@@ -9,6 +9,8 @@ from app.ingest import ingest_all
 from app.store import search_knowledge
 from app.llm import answer_with_context
 from app.metrics import metrics_snapshot, record_query
+from app.experiments import save_experiment, list_experiments, get_unevaluated, save_evaluation, summary as experiments_summary
+from app.evaluator import evaluate_generation
 
 app = FastAPI(title="High Scale Cyber RAG", version="1.1.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -18,6 +20,7 @@ class QueryRequest(BaseModel):
     query: str = Field(min_length=2)
     top_k: int = Field(default=5, ge=1, le=20)
     use_llm: bool = True
+    record_experiment: bool = True
 
 
 class RetrievalEvalRequest(BaseModel):
@@ -77,12 +80,16 @@ def query(req: QueryRequest):
             "use_llm": req.use_llm,
         }
         record_query(perf)
+        experiment_id = None
+        if req.record_experiment:
+            experiment_id = save_experiment(req.query, req.top_k, req.use_llm, answer, matches, perf)
 
         return {
             "query": req.query,
             "answer": answer,
             "matches": matches,
             "performance": perf,
+            "experiment_id": experiment_id,
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -138,3 +145,42 @@ def evaluate_retrieval(req: RetrievalEvalRequest):
 @app.get("/metrics")
 def metrics():
     return metrics_snapshot()
+
+
+@app.get("/experiments")
+def experiments(limit: int = 500):
+    limit = max(1, min(int(limit), 2000))
+    return {"records": list_experiments(limit)}
+
+
+@app.get("/experiments/summary")
+def experiments_summary_endpoint():
+    return experiments_summary()
+
+
+@app.post("/experiments/evaluate-all")
+def evaluate_all_experiments():
+    records = get_unevaluated(limit=200)
+    evaluated = []
+    failures = []
+
+    for record in records:
+        try:
+            result = evaluate_generation(
+                record["query"],
+                record.get("answer_text") or "",
+                record.get("matches") or [],
+            )
+            save_evaluation(record["id"], result)
+            evaluated.append({"id": record["id"], **result})
+        except Exception as exc:
+            failures.append({"id": record["id"], "error": str(exc)})
+
+    return {
+        "requested": len(records),
+        "evaluated": len(evaluated),
+        "failed": len(failures),
+        "results": evaluated,
+        "failures": failures,
+        "summary": experiments_summary(),
+    }
