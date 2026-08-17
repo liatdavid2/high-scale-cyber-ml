@@ -97,3 +97,11 @@ volumes:
 
 Load-test requests from the UI use `record_experiment=false`, so they do not flood the experiment history.
 The **Evaluation History** tab can evaluate all stored, unevaluated generated answers for groundedness and relevance. This uses additional OpenAI calls.
+
+## Live Experiment Run
+
+The UI includes an **Experiment Run** tab. Normal queries are tracked live through:
+
+`Chunking / knowledge prep -> Query embedding -> Vector retrieval -> LLM generation -> Answer evaluation -> Save experiment`
+
+Chunking is an ingestion-time step, so during a query it is reported as already prepared. "Evaluate this run" can be disabled to avoid the additional OpenAI judge call.

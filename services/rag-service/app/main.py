@@ -6,11 +6,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app.ingest import ingest_all
-from app.store import search_knowledge
+from app.store import search_knowledge, embed_query, retrieve_vector
 from app.llm import answer_with_context
 from app.metrics import metrics_snapshot, record_query
 from app.experiments import save_experiment, list_experiments, get_unevaluated, save_evaluation, summary as experiments_summary
 from app.evaluator import evaluate_generation
+from app.experiment_run import experiment_run
 
 app = FastAPI(title="High Scale Cyber RAG", version="1.1.0")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -21,6 +22,7 @@ class QueryRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     use_llm: bool = True
     record_experiment: bool = True
+    auto_evaluate: bool = True
 
 
 class RetrievalEvalRequest(BaseModel):
@@ -57,21 +59,61 @@ def ingest():
 @app.post("/query")
 def query(req: QueryRequest):
     started = time.perf_counter()
-    try:
-        retrieval_started = time.perf_counter()
-        matches = search_knowledge(req.query, req.top_k)
-        retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+    track_run = bool(req.record_experiment)
 
-        answer = answer_with_context(req.query, matches) if req.use_llm else None
-        generation_ms = answer.get("generation_ms", 0.0) if isinstance(answer, dict) else 0.0
+    if track_run:
+        experiment_run.start(req.query, req.top_k, req.use_llm, req.auto_evaluate)
+        # Document chunking happens during ingestion, not for every query.
+        experiment_run.update_stage(
+            "chunking",
+            "COMPLETED",
+            "Knowledge was already chunked and indexed during ingestion.",
+            0.0,
+        )
+
+    try:
+        if track_run:
+            experiment_run.update_stage("embedding", "RUNNING", "Creating query embedding with FastEmbed...")
+        stage_started = time.perf_counter()
+        vector = embed_query(req.query)
+        embedding_ms = (time.perf_counter() - stage_started) * 1000
+        if track_run:
+            experiment_run.update_stage("embedding", "COMPLETED", "Query embedding created.", embedding_ms)
+
+        if track_run:
+            experiment_run.update_stage("retrieval", "RUNNING", f"Searching Qdrant for Top-{req.top_k} chunks...")
+        stage_started = time.perf_counter()
+        matches = retrieve_vector(vector, req.top_k)
+        vector_search_ms = (time.perf_counter() - stage_started) * 1000
+        retrieval_ms = embedding_ms + vector_search_ms
+        if track_run:
+            experiment_run.update_stage(
+                "retrieval", "COMPLETED", f"Retrieved {len(matches)} chunks from Qdrant.", vector_search_ms
+            )
+
+        answer = None
+        if req.use_llm:
+            if track_run:
+                experiment_run.update_stage("generation", "RUNNING", "Generating answer from retrieved context...")
+            answer = answer_with_context(req.query, matches)
+            generation_ms = answer.get("generation_ms", 0.0) if isinstance(answer, dict) else 0.0
+            if track_run:
+                experiment_run.update_stage("generation", "COMPLETED", "Answer generated.", generation_ms)
+        else:
+            generation_ms = 0.0
+            if track_run:
+                experiment_run.update_stage("generation", "SKIPPED", "Retrieval-only mode; generation disabled.", 0.0)
+
         input_tokens = answer.get("input_tokens", 0) if isinstance(answer, dict) else 0
         output_tokens = answer.get("output_tokens", 0) if isinstance(answer, dict) else 0
-        total_ms = (time.perf_counter() - started) * 1000
+        total_ms_before_eval = (time.perf_counter() - started) * 1000
 
         perf = {
+            "embedding_ms": round(embedding_ms, 3),
+            "vector_search_ms": round(vector_search_ms, 3),
             "retrieval_ms": round(retrieval_ms, 3),
             "generation_ms": round(generation_ms, 3),
-            "total_ms": round(total_ms, 3),
+            "total_ms": round(total_ms_before_eval, 3),
             "input_tokens": int(input_tokens or 0),
             "output_tokens": int(output_tokens or 0),
             "total_tokens": int((input_tokens or 0) + (output_tokens or 0)),
@@ -80,9 +122,55 @@ def query(req: QueryRequest):
             "use_llm": req.use_llm,
         }
         record_query(perf)
+
+        evaluation = None
+        if req.record_experiment and req.auto_evaluate and req.use_llm:
+            if track_run:
+                experiment_run.update_stage("evaluation", "RUNNING", "Evaluating groundedness and relevance...")
+            stage_started = time.perf_counter()
+            try:
+                evaluation = evaluate_generation(
+                    req.query,
+                    (answer or {}).get("text", "") if isinstance(answer, dict) else str(answer or ""),
+                    matches,
+                )
+                eval_ms = (time.perf_counter() - stage_started) * 1000
+                if track_run:
+                    experiment_run.set_evaluation(evaluation)
+                    experiment_run.update_stage(
+                        "evaluation",
+                        "COMPLETED",
+                        f"Groundedness {evaluation.get('groundedness', 0):.3f}, relevance {evaluation.get('relevance', 0):.3f}.",
+                        eval_ms,
+                    )
+            except Exception as eval_exc:
+                eval_ms = (time.perf_counter() - stage_started) * 1000
+                evaluation = {"error": str(eval_exc)}
+                if track_run:
+                    experiment_run.set_evaluation(evaluation)
+                    experiment_run.update_stage("evaluation", "ERROR", str(eval_exc), eval_ms)
+        elif track_run:
+            reason = "Auto-evaluation disabled."
+            if not req.use_llm:
+                reason = "No generated answer to evaluate."
+            experiment_run.update_stage("evaluation", "SKIPPED", reason, 0.0)
+
         experiment_id = None
         if req.record_experiment:
+            if track_run:
+                experiment_run.update_stage("save", "RUNNING", "Saving query, sources and performance metrics to SQLite...")
+            stage_started = time.perf_counter()
             experiment_id = save_experiment(req.query, req.top_k, req.use_llm, answer, matches, perf)
+            if evaluation and not evaluation.get("error"):
+                save_evaluation(experiment_id, evaluation)
+            save_ms = (time.perf_counter() - stage_started) * 1000
+            if track_run:
+                experiment_run.set_experiment_id(experiment_id)
+                experiment_run.update_stage("save", "COMPLETED", f"Saved as experiment #{experiment_id}.", save_ms)
+
+        total_ms = (time.perf_counter() - started) * 1000
+        if track_run:
+            experiment_run.finish(total_ms)
 
         return {
             "query": req.query,
@@ -90,9 +178,17 @@ def query(req: QueryRequest):
             "matches": matches,
             "performance": perf,
             "experiment_id": experiment_id,
+            "evaluation": evaluation,
         }
     except Exception as exc:
+        if track_run:
+            experiment_run.fail(str(exc), (time.perf_counter() - started) * 1000)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/experiment-run")
+def experiment_run_status():
+    return experiment_run.snapshot()
 
 
 @app.post("/evaluate/retrieval")

@@ -54,18 +54,17 @@ def upsert_documents(documents: list[dict], batch_size: int = INGEST_BATCH_SIZE)
         )
 
         indexed += len(points)
-
-        # Release each batch before creating the next embeddings batch.
         del vectors, points, batch
         gc.collect()
 
     return indexed
 
 
-def search_knowledge(query: str, top_k: int = 5):
-    vector = embed_texts([query])[0]
+def embed_query(query: str):
+    return embed_texts([query])[0]
 
-    # qdrant-client versions differ; query_points is the current API.
+
+def retrieve_vector(vector: list[float], top_k: int = 5):
     result = _client.query_points(
         collection_name=COLLECTION,
         query=vector,
@@ -85,3 +84,8 @@ def search_knowledge(query: str, top_k: int = 5):
             "text": payload.get("text"),
         })
     return matches
+
+
+def search_knowledge(query: str, top_k: int = 5):
+    vector = embed_query(query)
+    return retrieve_vector(vector, top_k)

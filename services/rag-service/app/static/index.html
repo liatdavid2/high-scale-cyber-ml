@@ -20,6 +20,7 @@
     table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;border-bottom:1px solid var(--line);padding:10px;vertical-align:top}th{background:#e8e8e8}.score{font-weight:700}.good{color:var(--good)}.bad{color:var(--bad)}.muted{color:var(--muted)}
     pre{white-space:pre-wrap;word-break:break-word;background:#f4f4f4;padding:14px;max-height:330px;overflow:auto}.answer{line-height:1.5;background:#f4f4f4;padding:14px;min-height:80px}.source{padding:10px 0;border-bottom:1px solid var(--line)}.source b{color:#0043ce}.status{padding:10px 12px;margin:12px 0;background:#edf5ff;border-left:4px solid var(--blue)}
     .bar{height:8px;background:#e0e0e0;margin-top:7px}.bar>div{height:100%;background:var(--blue);width:0}.section-title{font-size:18px;font-weight:600;margin:0 0 14px}.tiny{font-size:12px;color:var(--muted)}
+    .stage-list{display:grid;gap:10px}.stage{display:grid;grid-template-columns:34px 220px 110px 1fr 110px;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);background:#fff}.stage-dot{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e0e0e0;font-size:12px;font-weight:700}.stage.RUNNING{border-left:4px solid var(--blue)}.stage.COMPLETED{border-left:4px solid var(--good)}.stage.ERROR{border-left:4px solid var(--bad)}.stage.SKIPPED{border-left:4px solid #8d8d8d}.stage.RUNNING .stage-dot{background:#d0e2ff;color:#0043ce}.stage.COMPLETED .stage-dot{background:#defbe6;color:#0e6027}.stage.ERROR .stage-dot{background:#fff1f1;color:#a2191f}.stage.SKIPPED .stage-dot{background:#e8e8e8;color:#525252}.badge{font-size:11px;font-weight:700;letter-spacing:.03em}.run-meta{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}.run-meta .kpi .v{font-size:18px}.progress-line{height:5px;background:#e0e0e0;margin-top:8px}.progress-line>div{height:100%;background:var(--blue);width:0}@media(max-width:900px){.stage{grid-template-columns:30px 1fr}.stage .stage-status,.stage .stage-message,.stage .stage-time{grid-column:2}.run-meta{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:900px){.c8,.c6,.c4,.c3{grid-column:span 12}.kpis{grid-template-columns:repeat(2,1fr)}.hero{flex-direction:column}}
   </style>
 </head>
@@ -34,6 +35,7 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="query">Query</div>
+    <div class="tab" data-tab="run">Experiment Run</div>
     <div class="tab" data-tab="retrieval">Retrieval Evaluation</div>
     <div class="tab" data-tab="performance">Performance</div>
     <div class="tab" data-tab="history">Evaluation History</div>
@@ -48,12 +50,41 @@
         <div class="row" style="margin-top:12px">
           <div class="field small"><label>Top K</label><select id="topK"><option>3</option><option selected>5</option><option>10</option><option>20</option></select></div>
           <div class="check"><input id="useLlm" type="checkbox" checked><label for="useLlm" style="margin:0">Generate answer with OpenAI</label></div>
+          <div class="check"><input id="autoEval" type="checkbox" checked><label for="autoEval" style="margin:0">Evaluate this run</label></div>
           <button id="askBtn" onclick="ask()">Ask</button>
         </div>
       </div>
       <div class="card c8"><div class="section-title">Answer</div><div id="answer" class="answer muted">No query yet.</div></div>
       <div class="card c4"><div class="section-title">Last Query Performance</div><div id="queryKpis" class="tiny">Metrics appear after a query.</div></div>
       <div class="card c12"><div class="section-title">Retrieved Sources</div><div id="sources" class="muted">No sources yet.</div></div>
+    </div>
+  </section>
+
+  <section id="run" class="panel">
+    <div class="grid">
+      <div class="card c12">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <div>
+            <div class="section-title">Live Experiment Run</div>
+            <div class="tiny">Tracks one normal RAG query in real time. Chunking happens during ingestion, so it is shown as already prepared during query runs.</div>
+          </div>
+          <button class="secondary" onclick="refreshExperimentRun()">Refresh</button>
+        </div>
+        <div class="progress-line"><div id="runProgress"></div></div>
+      </div>
+      <div class="card c12"><div id="runMeta" class="run-meta">
+        <div class="kpi"><div class="l">Run</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Status</div><div class="v">IDLE</div></div>
+        <div class="kpi"><div class="l">Top K</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Experiment ID</div><div class="v">—</div></div>
+        <div class="kpi"><div class="l">Total</div><div class="v">—</div></div>
+      </div></div>
+      <div class="card c12">
+        <div class="section-title">Pipeline</div>
+        <div id="runStages" class="stage-list"><div class="muted">Run a query to see live stages.</div></div>
+      </div>
+      <div class="card c6"><div class="section-title">Current Query</div><div id="runQuery" class="answer muted">No run yet.</div></div>
+      <div class="card c6"><div class="section-title">Evaluation Result</div><div id="runEvaluation" class="answer muted">No evaluation yet.</div></div>
     </div>
   </section>
 
@@ -134,10 +165,36 @@
 <script>
 const $=id=>document.getElementById(id); const fmt=(v,d=1)=>v==null?'—':Number(v).toFixed(d);
 function status(msg,error=false){$('globalStatus').textContent=msg;$('globalStatus').style.borderLeftColor=error?'#da1e28':'#0f62fe';}
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(t.dataset.tab).classList.add('active');if(t.dataset.tab==='performance')refreshMetrics();if(t.dataset.tab==='history')refreshExperiments();});
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab,.panel').forEach(x=>x.classList.remove('active'));t.classList.add('active');$(t.dataset.tab).classList.add('active');if(t.dataset.tab==='performance')refreshMetrics();if(t.dataset.tab==='history')refreshExperiments();if(t.dataset.tab==='run')refreshExperimentRun();});
 async function ingest(){status('Ingesting MITRE/CAPEC into Qdrant...');try{const r=await fetch('/ingest',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Ingest failed');status(`Ingestion completed: ${d.indexed||0} documents indexed into ${d.collection}.`);}catch(e){status(e.message,true)}}
-async function ask(){const q=$('question').value.trim();if(!q)return status('Enter a question first.',true);$('askBtn').disabled=true;status('Running RAG query...');try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,top_k:Number($('topK').value),use_llm:$('useLlm').checked})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Query failed');renderQuery(d);status('Query completed.');}catch(e){status(e.message,true)}finally{$('askBtn').disabled=false}}
+async function ask(){const q=$('question').value.trim();if(!q)return status('Enter a question first.',true);$('askBtn').disabled=true;status('Running RAG query...');let poll=setInterval(refreshExperimentRun,400);try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:q,top_k:Number($('topK').value),use_llm:$('useLlm').checked,auto_evaluate:$('autoEval').checked})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Query failed');renderQuery(d);await refreshExperimentRun();status('Query completed.');}catch(e){status(e.message,true)}finally{clearInterval(poll);$('askBtn').disabled=false}}
 function renderQuery(d){const a=d.answer; $('answer').classList.remove('muted');$('answer').textContent=a?.text||a?.message||($('useLlm').checked?'No generated answer.':'Retrieval-only mode.');const p=d.performance||{};$('queryKpis').innerHTML=`<table><tbody><tr><td>Retrieval</td><td><b>${fmt(p.retrieval_ms,2)} ms</b></td></tr><tr><td>Generation</td><td><b>${fmt(p.generation_ms,2)} ms</b></td></tr><tr><td>End-to-end</td><td><b>${fmt(p.total_ms,2)} ms</b></td></tr><tr><td>Input tokens</td><td><b>${p.input_tokens??0}</b></td></tr><tr><td>Output tokens</td><td><b>${p.output_tokens??0}</b></td></tr></tbody></table>`;$('sources').innerHTML=(d.matches||[]).map((m,i)=>`<div class="source"><b>#${i+1} ${esc(m.id||'')} — ${esc(m.name||'')}</b><div class="tiny">${esc(m.source||'')} · similarity ${fmt(m.score,4)}</div><div>${esc((m.text||'').slice(0,500))}${(m.text||'').length>500?'…':''}</div></div>`).join('')||'<span class="muted">No matches.</span>';}
+async function refreshExperimentRun(){
+  try{
+    const r=await fetch('/experiment-run');
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||'Could not load experiment run');
+    renderExperimentRun(d);
+  }catch(e){console.error(e)}
+}
+function renderExperimentRun(d){
+  const stages=d.stages||[];
+  const finished=stages.filter(x=>['COMPLETED','SKIPPED','ERROR'].includes(x.status)).length;
+  $('runProgress').style.width=`${stages.length?finished/stages.length*100:0}%`;
+  $('runMeta').innerHTML=`<div class="kpi"><div class="l">Run</div><div class="v">${d.run_id??'—'}</div></div><div class="kpi"><div class="l">Status</div><div class="v">${esc(d.status||'IDLE')}</div></div><div class="kpi"><div class="l">Top K</div><div class="v">${d.top_k??'—'}</div></div><div class="kpi"><div class="l">Experiment ID</div><div class="v">${d.experiment_id??'—'}</div></div><div class="kpi"><div class="l">Total</div><div class="v">${d.total_ms==null?'—':fmt(d.total_ms,0)+' ms'}</div></div>`;
+  $('runQuery').classList.toggle('muted',!d.query);
+  $('runQuery').textContent=d.query||'No run yet.';
+  if(!stages.length||!d.run_id){$('runStages').innerHTML='<div class="muted">Run a query to see live stages.</div>';}else{
+    $('runStages').innerHTML=stages.map((x,i)=>{
+      const icon=x.status==='COMPLETED'?'✓':x.status==='ERROR'?'!':x.status==='SKIPPED'?'–':x.status==='RUNNING'?'▶':i+1;
+      return `<div class="stage ${esc(x.status)}"><div class="stage-dot">${icon}</div><div><b>${esc(x.label)}</b></div><div class="stage-status badge">${esc(x.status)}</div><div class="stage-message tiny">${esc(x.message||'')}</div><div class="stage-time"><b>${x.duration_ms==null?'—':fmt(x.duration_ms,1)+' ms'}</b></div></div>`;
+    }).join('');
+  }
+  const e=d.evaluation;
+  if(e&&e.error){$('runEvaluation').classList.remove('muted');$('runEvaluation').textContent='Evaluation error: '+e.error;}
+  else if(e){$('runEvaluation').classList.remove('muted');$('runEvaluation').innerHTML=`<b>Groundedness:</b> ${fmt(e.groundedness,3)}<br><b>Relevance:</b> ${fmt(e.relevance,3)}<br><span class="tiny">${esc(e.notes||'')}</span>`;}
+  else{$('runEvaluation').classList.add('muted');$('runEvaluation').textContent=d.auto_evaluate===false?'Evaluation disabled.':'No evaluation yet.';}
+}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function runRetrievalEval(){$('evalBtn').disabled=true;status('Running retrieval benchmark...');try{const r=await fetch('/evaluate/retrieval',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({top_k:Number($('evalTopK').value)})});const d=await r.json();if(!r.ok)throw new Error(d.detail||'Benchmark failed');$('retrievalKpis').innerHTML=`<div class="kpi"><div class="l">Hit@${d.top_k}</div><div class="v">${fmt(d.hit_rate_at_k*100,0)}%</div></div><div class="kpi"><div class="l">MRR</div><div class="v">${fmt(d.mrr,3)}</div></div><div class="kpi"><div class="l">Avg Retrieval</div><div class="v">${fmt(d.avg_retrieval_ms,1)} ms</div></div>`;$('evalRows').innerHTML=d.results.map(x=>`<tr><td>${esc(x.query)}</td><td><b>${esc(x.expected_id)}</b></td><td class="${x.hit?'good':'bad'}">${x.hit?'PASS':'MISS'}</td><td>${x.rank??'—'}</td><td>${fmt(x.latency_ms,1)} ms</td><td>${esc((x.returned_ids||[]).join(', '))}</td></tr>`).join('');status('Retrieval benchmark completed.');}catch(e){status(e.message,true)}finally{$('evalBtn').disabled=false}}
 async function refreshMetrics(){try{const r=await fetch('/metrics');const d=await r.json();const l=d.latency_ms||{},t=d.tokens||{},res=d.resources||{};$('perfKpis').innerHTML=`<div class="kpi"><div class="l">Queries</div><div class="v">${d.queries_recorded??0}</div></div><div class="kpi"><div class="l">P50 Total</div><div class="v">${fmt(l.p50_total)} ms</div></div><div class="kpi"><div class="l">P95 Total</div><div class="v">${fmt(l.p95_total)} ms</div></div><div class="kpi"><div class="l">P99 Total</div><div class="v">${fmt(l.p99_total)} ms</div></div><div class="kpi"><div class="l">Tokens</div><div class="v">${t.total??0}</div></div>`;$('latencyTable').innerHTML=`<tr><td>P50 retrieval</td><td>${fmt(l.p50_retrieval)} ms</td></tr><tr><td>P95 retrieval</td><td>${fmt(l.p95_retrieval)} ms</td></tr><tr><td>P50 generation</td><td>${fmt(l.p50_generation)} ms</td></tr><tr><td>P95 generation</td><td>${fmt(l.p95_generation)} ms</td></tr><tr><td>P95 end-to-end</td><td>${fmt(l.p95_total)} ms</td></tr>`;$('resourceTable').innerHTML=`<tr><td>Input tokens</td><td>${t.input??0}</td></tr><tr><td>Output tokens</td><td>${t.output??0}</td></tr><tr><td>Process CPU</td><td>${res.cpu_percent==null?'—':fmt(res.cpu_percent)+'%'}</td></tr><tr><td>Process memory</td><td>${res.memory_mb==null?'—':fmt(res.memory_mb)+' MB'}</td></tr><tr><td>System memory</td><td>${res.system_memory_percent==null?'—':fmt(res.system_memory_percent)+'%'}</td></tr>`;}catch(e){status('Metrics error: '+e.message,true)}}
@@ -173,6 +230,7 @@ async function evaluateAllQueries(){
 function pct(vals,p){if(!vals.length)return 0;const a=[...vals].sort((x,y)=>x-y),idx=(a.length-1)*p,lo=Math.floor(idx),hi=Math.ceil(idx);return a[lo]+(a[hi]-a[lo])*(idx-lo)}
 async function runLoadTest(){const total=Math.max(1,Number($('loadRequests').value)),conc=Math.max(1,Number($('concurrency').value)),useLlm=$('loadMode').value==='true';if(useLlm&&!confirm('Full RAG load test will call OpenAI for every request and consume API tokens. Continue?'))return;$('loadBtn').disabled=true;let next=0,done=0,errors=0,times=[];$('loadBar').style.width='0%';const started=performance.now();const worker=async()=>{while(true){const i=next++;if(i>=total)return;const t0=performance.now();try{const r=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:'What ATT&CK technique covers credential dumping?',top_k:5,use_llm:useLlm,record_experiment:false})});if(!r.ok)errors++;await r.json();}catch(e){errors++}times.push(performance.now()-t0);done++;$('loadBar').style.width=`${done/total*100}%`;$('loadProgress').textContent=`${done}/${total} completed`;}};status(`Running ${total} requests with concurrency ${conc}...`);await Promise.all(Array.from({length:Math.min(conc,total)},worker));const sec=(performance.now()-started)/1000,rps=total/sec,rph=rps*3600,p50=pct(times,.5),p95=pct(times,.95),p99=pct(times,.99),er=errors/total;$('scaleKpis').innerHTML=`<div class="kpi"><div class="l">Throughput</div><div class="v">${fmt(rps,1)} rps</div></div><div class="kpi"><div class="l">Requests/hour</div><div class="v">${(rph/1e6).toFixed(2)}M</div></div><div class="kpi"><div class="l">P95</div><div class="v">${fmt(p95,0)} ms</div></div><div class="kpi"><div class="l">P99</div><div class="v">${fmt(p99,0)} ms</div></div><div class="kpi"><div class="l">Error rate</div><div class="v">${fmt(er*100,2)}%</div></div>`;const passR=rps>=278,passL=useLlm?null:p95<500,passE=er<.01;$('scaleBenchmark').innerHTML=`<tr><td>Throughput</td><td>${fmt(rps,1)} req/s</td><td>≥ 278 req/s (≈1M/hour)</td><td class="${passR?'good':'bad'}">${passR?'PASS':'FAIL'}</td></tr><tr><td>P95 latency</td><td>${fmt(p95,0)} ms</td><td>${useLlm?'Informational for Full RAG':'< 500 ms retrieval-only'}</td><td class="${passL===null?'':' '+(passL?'good':'bad')}">${passL===null?'INFO':passL?'PASS':'FAIL'}</td></tr><tr><td>Error rate</td><td>${fmt(er*100,2)}%</td><td>< 1%</td><td class="${passE?'good':'bad'}">${passE?'PASS':'FAIL'}</td></tr>`;$('loadProgress').textContent=`Completed ${total} requests in ${fmt(sec,2)} s.`;status('Load test completed.');$('loadBtn').disabled=false;refreshMetrics()}
 refreshMetrics();
+refreshExperimentRun();
 </script>
 </body>
 </html>
